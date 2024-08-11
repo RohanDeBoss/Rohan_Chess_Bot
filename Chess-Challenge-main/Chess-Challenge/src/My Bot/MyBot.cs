@@ -4,10 +4,12 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
-//v2.1
+
+//v2.2.1
 public class MyBot : IChessBot
 {
-    private const int SEARCH_DEPTH = 4;
+    private int defultSearch = 6; //recomended 6
+    private int searchDepth;
     private Move? chosenMove;
 
     // Data structures for move ordering
@@ -20,12 +22,47 @@ public class MyBot : IChessBot
 
     private ulong[] bitboards = new ulong[12]; // 0-5: White pieces, 6-11: Black pieces
 
+    
     public Move Think(Board board, Timer timer)
     {
         InitializeBitboards(board);
-        Minimax(board, SEARCH_DEPTH, int.MinValue, int.MaxValue, board.IsWhiteToMove, true);
+
+        // Adjust search depth based on time remaining
+        //minimum of depth 4 or else just use lower depth
+        if (defultSearch >= 4)
+        {
+            if (timer.MillisecondsRemaining <= 1500)
+            {
+                searchDepth = 2;
+            }
+            else if (timer.MillisecondsRemaining <= 7500)
+            {
+                searchDepth = defultSearch - 3;
+            }
+            else if (timer.MillisecondsRemaining <= 25000)
+            {
+                searchDepth = defultSearch - 2;
+            }
+            else if (timer.MillisecondsRemaining <= 54000)
+            {
+                searchDepth = defultSearch - 1;
+            }
+            else
+            {
+                searchDepth = defultSearch;
+            }
+
+        }
+        else 
+        {
+            searchDepth = defultSearch;
+        }
+
+        Minimax(board, searchDepth, int.MinValue, int.MaxValue, board.IsWhiteToMove, true);
+
         return chosenMove ?? new Move(); // Return an empty move if no move is chosen
     }
+
 
     private void InitializeBitboards(Board board)
     {
@@ -103,44 +140,44 @@ public class MyBot : IChessBot
 };
 
     private static readonly int[] KnightTable = {
-    -50,-40,-30,-30,-30,-30,-40,-50,
+    -50,-45,-30,-30,-30,-30,-45,-50,
     -40,-20,  0,  0,  0,  0,-20,-40,
     -30,  0, 15, 15, 15, 15,  0,-30,
     -30,  5, 15, 20, 20, 15,  5,-30,
     -30,  0, 15, 20, 20, 15,  0,-30,
     -30,  5, 15, 15, 15, 15,  5,-30,
     -40,-20,  0,  5,  5,  0,-20,-40,
-    -50,-40,-30,-30,-30,-30,-40,-50
+    -50,-45,-30,-30,-30,-30,-45,-50
 };
 
     private static readonly int[] BishopTable = {
-    -20,-10,-10,-10,-10,-10,-10,-20,
+    -20,-10,-15,-10,-10,-15,-10,-20,
     -10,  0,  0,  0,  0,  0,  0,-10,
     -10,  0,  5, 10, 10,  5,  0,-10,
     -10,  5,  5, 10, 10,  5,  5,-10,
     -10,  0, 10, 10, 10, 10,  0,-10,
     -10, 10, 10, 10, 10, 10, 10,-10,
     -10,  5,  0,  0,  0,  0,  5,-10,
-    -20,-10,-10,-10,-10,-10,-10,-20
+    -20,-10,-15,-10,-10,-15,-10,-20
 };
 
     private static readonly int[] RookTable = {
+    -1, 0,  5, 9,  9,   5,  0, -1,
+    0,  5,  5, 10, 10,  5,  5,  0,
     0,  0,  5, 10, 10,  5,  0,  0,
     0,  0,  5, 10, 10,  5,  0,  0,
     0,  0,  5, 10, 10,  5,  0,  0,
     0,  0,  5, 10, 10,  5,  0,  0,
-    0,  0,  5, 10, 10,  5,  0,  0,
-    0,  0,  5, 10, 10,  5,  0,  0,
-    0,  0,  5, 10, 10,  5,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0
+    0,  5,  5, 10, 10,  5,  5,  0,
+    -1, 0,  0,  0,  0,  0,  0, -1
 };
 
     private static readonly int[] QueenTable = {
     -20,-10,-10, -5, -5,-10,-10,-20,
     -10,  0,  0,  0,  0,  0,  0,-10,
     -10,  0,  5,  5,  5,  5,  0,-10,
-    -5,  0,  5,  5,  5,  5,  0, -5,
-    0,  0,  5,  5,  5,  5,  0, -5,
+    -5,   0,  5,  5,  5,  5,  0, -5,
+     0,   0,  5,  5,  5,  5,  0, -5,
     -10,  5,  5,  5,  5,  5,  0,-10,
     -10,  0,  5,  0,  0,  0,  0,-10,
     -20,-10,-10, -5, -5,-10,-10,-20
@@ -154,7 +191,7 @@ public class MyBot : IChessBot
     -20,-30,-30,-40,-40,-30,-30,-20,
     -10,-20,-20,-20,-20,-20,-20,-10,
     20, 20,  0,  0,  0,  0, 20, 20,
-    20, 30, 10,  0,  0, 10, 30, 20
+    20, 30,  0,  0,  0,  0, 30, 20
 };
     // King Endgame Table
     int[] KingEndGameTable = new int[64]
@@ -163,8 +200,8 @@ public class MyBot : IChessBot
      0,  5,  5,  5,  5,  5,  5,  0,
      5, 10, 10, 10, 10, 10, 10,  5,
      5, 10, 20, 20, 20, 20, 10,  5,
-     5, 10, 20, 20, 20, 20, 10,  5,
-     5, 10, 20, 20, 20, 20, 10,  5,
+     5, 10, 20, 19, 19, 20, 10,  5,
+     5, 10, 20, 19, 19, 20, 10,  5,
      5, 10, 20, 20, 20, 20, 10,  5,
      5, 10, 10, 10, 10, 10, 10,  5,
      0,  5,  5,  5,  5,  5,  5,  0
@@ -181,7 +218,7 @@ public class MyBot : IChessBot
 
         if (board.IsDraw())
         {
-            return 0; // Neutral score for draw
+            return -100; // Negative score for draw
         }
 
         int material = 0;
@@ -277,14 +314,10 @@ public class MyBot : IChessBot
 
     int GetPawnRank(ulong pawn, bool isWhite)
     {
-        // Return the rank (1-8) of the given pawn
-        // Adjust based on bitboard representation
-        // Example: assuming LSB (least significant bit) is A1, MSB is H8
         int rank = 0;
-
-        // Implement logic to get the rank of a pawn, depending on the side (white or black)
-
-        return rank;
+        int squareIndex = BitOperations.TrailingZeroCount(pawn);
+        rank = (squareIndex / 8) + 1;
+        return isWhite ? rank : 9 - rank; // Flip rank for black
     }
 
     IEnumerable<ulong> GetPawnBitboards(ulong pawns)

@@ -8,7 +8,7 @@ using System.Numerics;
 //v1.5.1
 public class EvilBot : IChessBot
 {
-    private const int SEARCH_DEPTH = 4;
+    private const int SEARCH_DEPTH = 3;
     private Move? chosenMove;
 
     // Data structures for move ordering
