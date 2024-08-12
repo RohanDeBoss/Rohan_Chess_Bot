@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
 //v2.3
-
+//Now I want by bot to detect forced mates and debug log for depth reached.
 public class MyBot : IChessBot
 {
     private int defultSearch = 6; //recomended 6
