@@ -3,12 +3,13 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
+using System.Security.Cryptography.X509Certificates;
 //v2.3
 //Now I want by bot to detect forced mates and debug log for depth reached.
 public class MyBot : IChessBot
 {
     private int defultSearch = 6; //recomended 6
-    private int searchDepth;
+    public int searchDepth;
     private Move? chosenMove;
 
     // Data structures for move ordering
@@ -20,7 +21,6 @@ public class MyBot : IChessBot
     private ulong blackPawns, blackKnights, blackBishops, blackRooks, blackQueens, blackKings;
 
     private ulong[] bitboards = new ulong[12]; // 0-5: White pieces, 6-11: Black pieces
-
 
     public Move Think(Board board, Timer timer)
     {
@@ -67,7 +67,9 @@ public class MyBot : IChessBot
         // Evaluation debugging - Uncomment the next line to see evaluation before choosing a move
         EvaluationDebugger debugger = new EvaluationDebugger(this);
         debugger.PrintEvaluation(board); // This will output the evaluation to the console
-
+        // Same for depth
+        debugger.PrintDepth(board);
+        
         return chosenMove ?? new Move(); // Return an empty move if no move is chosen
     }
 
@@ -430,6 +432,7 @@ public class MyBot : IChessBot
         material += CountBits(pieces[2]) * 320;  // Bishops
         material += CountBits(pieces[3]) * 500;  // Rooks
         material += CountBits(pieces[4]) * 900;  // Queens
+        material += CountBits(pieces[5]) * 9999;  // Kings
 
         return material;
     }
@@ -491,7 +494,7 @@ public class MyBot : IChessBot
             PieceType.Bishop => 3,
             PieceType.Rook => 5,
             PieceType.Queen => 9,
-            PieceType.King => 1000,
+            PieceType.King => 99999,
             _ => 0
         };
     }
@@ -592,7 +595,7 @@ public class MyBot : IChessBot
 public class EvaluationDebugger
 {
     private MyBot myBot;
-
+    public int searchDepth;
     public EvaluationDebugger(MyBot bot)
     {
         myBot = bot;
@@ -602,6 +605,12 @@ public class EvaluationDebugger
     {
         // Assuming your bot has an Evaluate method
         int evaluation = myBot.Evaluate(board, 0);
-        Console.WriteLine($"Evaluation for the current position: {(double)evaluation / 100}");
+        Console.WriteLine($"MyBot Evaluation: {(double)evaluation / 100}");
+  
+    }
+    public void PrintDepth(Board board)
+    {
+        int searchDepth = myBot.searchDepth;
+        Console.WriteLine($"Depth Searched: {searchDepth}");
     }
 }
