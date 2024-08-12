@@ -8,6 +8,8 @@ using System.Security.Cryptography.X509Certificates;
 //Now I want by bot to detect forced mates and disply for current evaluation in ui + depth?.
 public class MyBot : IChessBot
 {
+    public int bestEvaluation { get; private set; }
+
     private int defultSearch = 6; //recomended 6
     public int searchDepth;
     private Move? chosenMove;
@@ -68,10 +70,12 @@ public class MyBot : IChessBot
         EvaluationDebugger debugger = new EvaluationDebugger(this);
         debugger.PrintEvaluation(board); // This will output the evaluation to the console
         // Same for depth
-        debugger.PrintDepth(Minimax);
+        debugger.PrintDepth(board);
 
         return chosenMove ?? new Move(); // Return an empty move if no move is chosen
     }
+
+
 
     private void InitializeBitboards(Board board)
     {
@@ -496,7 +500,7 @@ public class MyBot : IChessBot
             _ => 0
         };
     }
-    int Minimax(Board board, int depth, int alpha, int beta, bool isMaximizing, bool isRoot)
+    public int Minimax(Board board, int depth, int alpha, int beta, bool isMaximizing, bool isRoot)
     {
         if (depth == 0 || board.IsInCheckmate() || board.IsDraw())
             return Evaluate(board, depth);
@@ -511,13 +515,11 @@ public class MyBot : IChessBot
             int score1 = history.ContainsKey(m1) ? history[m1] : 0;
             int score2 = history.ContainsKey(m2) ? history[m2] : 0;
 
-            // Prioritize killer moves
             if (killerMoves.ContainsKey(m1))
                 score1 += 5000;
             if (killerMoves.ContainsKey(m2))
                 score2 += 5000;
 
-            // MVV-LVA scoring for captures
             score1 += GetMVVLVAScore(m1, board);
             score2 += GetMVVLVAScore(m2, board);
 
@@ -571,8 +573,12 @@ public class MyBot : IChessBot
             }
         }
 
-        if (isRoot && bestMove.HasValue)
-            chosenMove = bestMove.Value;
+        if (isRoot)
+        {
+            this.bestEvaluation = bestEvaluation; // Store the best evaluation at the root level
+            if (bestMove.HasValue)
+                chosenMove = bestMove.Value;
+        }
 
         // Update history and killer moves
         if (bestMove.HasValue)
@@ -584,7 +590,7 @@ public class MyBot : IChessBot
                 history[move] = 1;
 
             if (isRoot)
-                killerMoves[move] = 2; // Assign a value to killer move
+                killerMoves[move] = 2;
         }
 
         return bestEvaluation;
@@ -592,23 +598,20 @@ public class MyBot : IChessBot
 }
 public class EvaluationDebugger
 {
-    private MyBot myBot;
-    public int searchDepth;
+    private MyBot bot;
+
     public EvaluationDebugger(MyBot bot)
     {
-        myBot = bot;
+        this.bot = bot;
     }
-
     public void PrintEvaluation(Board board)
     {
-        // Assuming your bot has an Evaluate method
-        int evaluation = myBot.Evaluate(board, 0);
-        Console.WriteLine($"MyBot Evaluation: {(double)evaluation / 100}");
-
+        Console.WriteLine($"Evaluation: {(Double)bot.bestEvaluation/100}");
     }
+
     public void PrintDepth(Board board)
     {
-        int searchDepth = myBot.searchDepth;
-        Console.WriteLine($"Depth Searched: {searchDepth}");
+        Console.WriteLine($"Search Depth: {bot.searchDepth}");
     }
 }
+
