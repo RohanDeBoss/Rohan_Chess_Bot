@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
 
-//v2.2.1
+//v2.2
 public class MyBot : IChessBot
 {
     private int defultSearch = 6; //recomended 6

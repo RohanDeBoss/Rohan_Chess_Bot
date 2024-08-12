@@ -1,11 +1,10 @@
 ﻿using ChessChallenge.API;
-using Raylib_cs;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
+//v2.3
 
-//v2.2.1
 public class MyBot : IChessBot
 {
     private int defultSearch = 6; //recomended 6
@@ -22,20 +21,19 @@ public class MyBot : IChessBot
 
     private ulong[] bitboards = new ulong[12]; // 0-5: White pieces, 6-11: Black pieces
 
-    
+
     public Move Think(Board board, Timer timer)
     {
         InitializeBitboards(board);
 
         // Adjust search depth based on time remaining
-        //minimum of depth 4 or else just use lower depth
-        if (defultSearch >= 4)
+        if (defultSearch > 4)
         {
-            if (timer.MillisecondsRemaining <= 1500)
+            if (timer.MillisecondsRemaining <= 1900)
             {
                 searchDepth = 2;
             }
-            else if (timer.MillisecondsRemaining <= 7500)
+            else if (timer.MillisecondsRemaining <= 8000)
             {
                 searchDepth = defultSearch - 3;
             }
@@ -43,7 +41,7 @@ public class MyBot : IChessBot
             {
                 searchDepth = defultSearch - 2;
             }
-            else if (timer.MillisecondsRemaining <= 54000)
+            else if (timer.MillisecondsRemaining <= 56000)
             {
                 searchDepth = defultSearch - 1;
             }
@@ -51,17 +49,28 @@ public class MyBot : IChessBot
             {
                 searchDepth = defultSearch;
             }
-
         }
-        else 
+        else
         {
-            searchDepth = defultSearch;
+            if (timer.MillisecondsRemaining <= 55000)
+            {
+                searchDepth = defultSearch;
+            }
+            else
+            {
+                searchDepth = defultSearch + 1;
+            }
         }
 
         Minimax(board, searchDepth, int.MinValue, int.MaxValue, board.IsWhiteToMove, true);
 
+        // Evaluation debugging - Uncomment the next line to see evaluation before choosing a move
+        EvaluationDebugger debugger = new EvaluationDebugger(this);
+        debugger.PrintEvaluation(board); // This will output the evaluation to the console
+
         return chosenMove ?? new Move(); // Return an empty move if no move is chosen
     }
+
 
 
     private void InitializeBitboards(Board board)
@@ -207,8 +216,45 @@ public class MyBot : IChessBot
      0,  5,  5,  5,  5,  5,  5,  0
     };
 
+    private int QuiescenceSearch(Board board, int alpha, int beta, bool isWhiteToMove)
+    {
+        int standPat = Evaluate(board, 0); // Static evaluation at the current position
 
-    int Evaluate(Board board, int depth)
+        if (standPat >= beta)
+        {
+            return beta;
+        }
+
+        if (standPat > alpha) alpha = standPat;
+        if (alpha >= beta) return alpha;
+
+        var legalMoves = board.GetLegalMoves();
+
+        foreach (var move in legalMoves)
+        {
+            if (move.IsCapture) // Only consider captures
+            {
+                board.MakeMove(move);
+                int score = -QuiescenceSearch(board, -beta, -alpha, !isWhiteToMove);
+                board.UndoMove(move);
+
+                if (score >= beta)
+                {
+                    return beta;
+                }
+
+                if (score > alpha)
+                {
+                    alpha = score;
+                }
+            }
+        }
+
+        return alpha;
+    }
+
+
+    public int Evaluate(Board board, int depth)
     {
         // Checkmate and draw evaluations
         if (board.IsInCheckmate())
@@ -218,7 +264,7 @@ public class MyBot : IChessBot
 
         if (board.IsDraw())
         {
-            return -100; // Negative score for draw
+            return -40; // Negative score for draw
         }
 
         int material = 0;
@@ -252,7 +298,7 @@ public class MyBot : IChessBot
         int whiteMaterial = CountMaterial(board, true);
         int blackMaterial = CountMaterial(board, false);
 
-        if (whiteMaterial < 1800 || blackMaterial < 1800) // Endgame
+        if (whiteMaterial < 1750 || blackMaterial < 1750) // Endgame
         {
             positional += EvaluatePieceSquareTables(whiteKings, KingEndGameTable, true);
             positional -= EvaluatePieceSquareTables(blackKings, KingEndGameTable, false);
@@ -364,7 +410,7 @@ public class MyBot : IChessBot
 
         int endgameScore = 0;
 
-        if (whiteMaterial < 1800 || blackMaterial < 1800) // Arbitrary endgame threshold
+        if (whiteMaterial < 1750 || blackMaterial < 1750) // Arbitrary endgame threshold
         {
             endgameScore += CountEndgameKingSafety(whiteKings, true) - CountEndgameKingSafety(blackKings, false);
             endgameScore += CountEndgamePawnStructure(whitePawns, true) - CountEndgamePawnStructure(blackPawns, false);
@@ -388,61 +434,12 @@ public class MyBot : IChessBot
         return material;
     }
 
-    private struct TTEntry
-    {
-        public ulong ZobristKey;
-        public int Depth;
-        public int Score;
-        public Move BestMove;
-        public byte Flag; // 0 = exact, 1 = lower bound, 2 = upper bound
-    }
-    private const int TT_SIZE = 1 << 24; // 16 million entries
-    private TTEntry[] transpositionTable = new TTEntry[TT_SIZE];
-    private ulong[,] zobristTable = new ulong[12, 64];
-    private ulong sideToMove;
-
-    private void InitializeZobristTable()
-    {
-        Random rand = new Random(1234); // Use a fixed seed for reproducibility
-        for (int piece = 0; piece < 12; piece++)
-        {
-            for (int square = 0; square < 64; square++)
-            {
-                zobristTable[piece, square] = (ulong)rand.NextInt64();
-            }
-        }
-        sideToMove = (ulong)rand.NextInt64();
-    }
-
-    private ulong ComputeZobristKey(Board board)
-    {
-        ulong key = 0;
-        for (int square = 0; square < 64; square++)
-        {
-            Piece piece = board.GetPiece(new Square(square));
-            if (piece.PieceType != PieceType.None)
-            {
-                int pieceIndex = GetBitboardIndex(piece);
-                key ^= zobristTable[pieceIndex, square];
-            }
-        }
-        if (board.IsWhiteToMove)
-            key ^= sideToMove;
-        return key;
-    }
     private int CountEndgameKingSafety(ulong kingBitboard, bool isWhite)
     {
         int safety = 0;
 
         // Define masks for central and edge squares
-        ulong centralSquares = 0x0000001818000000UL; // Central 4 squares
-        ulong edgeSquares = 0x00FF000000FF00FFUL;    // Edge squares
-
-        // Check if the king is on the central squares
-        if ((kingBitboard & centralSquares) != 0)
-        {
-            safety += isWhite ? 10 : -10;
-        }
+        ulong edgeSquares = 0x00FF000000FF00FFUL; // Edge squares
 
         // Check if the king is on the edge squares
         if ((kingBitboard & edgeSquares) != 0)
@@ -465,11 +462,11 @@ public class MyBot : IChessBot
             ulong filePawns = pawnsBitboard & (isolatedPawnsMask << i);
             if (CountBits(filePawns) > 1) // Doubled pawns
             {
-                structureScore -= isWhite ? 15 : -15;
+                structureScore -= isWhite ? 14 : -14;
             }
             else if (filePawns == 0) // Isolated pawns
             {
-                structureScore -= isWhite ? 15 : -15;
+                structureScore -= isWhite ? 20 : -20;
             }
         }
 
@@ -586,9 +583,25 @@ public class MyBot : IChessBot
                 history[move] = 1;
 
             if (isRoot)
-                killerMoves[move] = 1; // Assign a value to killer move
+                killerMoves[move] = 2; // Assign a value to killer move
         }
 
         return bestEvaluation;
+    }
+}
+public class EvaluationDebugger
+{
+    private MyBot myBot;
+
+    public EvaluationDebugger(MyBot bot)
+    {
+        myBot = bot;
+    }
+
+    public void PrintEvaluation(Board board)
+    {
+        // Assuming your bot has an Evaluate method
+        int evaluation = myBot.Evaluate(board, 0);
+        Console.WriteLine($"Evaluation for the current position: {(double)evaluation / 100}");
     }
 }
