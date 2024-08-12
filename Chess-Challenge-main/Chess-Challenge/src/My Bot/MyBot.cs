@@ -5,7 +5,7 @@ using System.Diagnostics;
 using System.Numerics;
 using System.Security.Cryptography.X509Certificates;
 //v2.3
-//Now I want by bot to detect forced mates and debug log for depth reached.
+//Now I want by bot to detect forced mates and disply for current evaluation in ui + depth?.
 public class MyBot : IChessBot
 {
     private int defultSearch = 6; //recomended 6
@@ -68,12 +68,10 @@ public class MyBot : IChessBot
         EvaluationDebugger debugger = new EvaluationDebugger(this);
         debugger.PrintEvaluation(board); // This will output the evaluation to the console
         // Same for depth
-        debugger.PrintDepth(board);
-        
+        debugger.PrintDepth(Minimax);
+
         return chosenMove ?? new Move(); // Return an empty move if no move is chosen
     }
-
-
 
     private void InitializeBitboards(Board board)
     {
@@ -606,7 +604,7 @@ public class EvaluationDebugger
         // Assuming your bot has an Evaluate method
         int evaluation = myBot.Evaluate(board, 0);
         Console.WriteLine($"MyBot Evaluation: {(double)evaluation / 100}");
-  
+
     }
     public void PrintDepth(Board board)
     {
