@@ -615,8 +615,6 @@ public class EvaluationDebugger
         {
             Console.WriteLine($"Evaluation: {(Double)bot.bestEvaluation / 100}");
         }
-
-        Console.WriteLine($"BestEvaluation: {(Double)bot.bestEvaluation / 100}");
     }
 
     public void PrintDepth(Board board)
