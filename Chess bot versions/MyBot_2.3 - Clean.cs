@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Numerics;
 
-//v2.4
+//v2.3 clean
 //Now I want by bot to detect forced mates and disply for current evaluation in ui + depth?.
 public class MyBot : IChessBot
 {
@@ -64,13 +64,6 @@ public class MyBot : IChessBot
             }
         }
         Minimax(board, searchDepth, int.MinValue, int.MaxValue, board.IsWhiteToMove, true);
-
-
-        // Evaluation debugging - Uncomment the next line to see evaluation
-        EvaluationDebugger debugger = new(this);
-        debugger.PrintEvaluation(board); // This will output the evaluation
-        debugger.PrintDepth(board); // Same for depth
-
 
         return chosenMove ?? new Move(); // Return an empty move if no move is chosen
     }
@@ -421,14 +414,15 @@ public class MyBot : IChessBot
     private int CountMaterial(Board board, bool isWhite)
     {
         int material = 0;
-        ulong[] pieces = isWhite ? new[] { whitePawns, whiteKnights, whiteBishops, whiteRooks, whiteQueens } :
-                                    new[] { blackPawns, blackKnights, blackBishops, blackRooks, blackQueens };
+        ulong[] pieces = isWhite ? new[] { whitePawns, whiteKnights, whiteBishops, whiteRooks, whiteQueens, whiteKings } :
+                                    new[] { blackPawns, blackKnights, blackBishops, blackRooks, blackQueens, blackKings };
 
         material += CountBits(pieces[0]) * 100;  // Pawns
-        material += CountBits(pieces[1]) * 315;  // Knights
-        material += CountBits(pieces[2]) * 330;  // Bishops
+        material += CountBits(pieces[1]) * 305;  // Knights
+        material += CountBits(pieces[2]) * 320;  // Bishops
         material += CountBits(pieces[3]) * 500;  // Rooks
         material += CountBits(pieces[4]) * 900;  // Queens
+        material += CountBits(pieces[5]) * 9999;  // Kings
 
         return material;
     }
@@ -588,39 +582,5 @@ public class MyBot : IChessBot
         }
 
         return bestEvaluation;
-    }
-}
-public class EvaluationDebugger
-{
-    private MyBot bot;
-    private int Evaluate;
-    public EvaluationDebugger(MyBot bot)
-    {
-        this.bot = bot;
-    }
-    public void PrintEvaluation(Board board)
-    {
-        //Attempt at writing mate in:
-
-        if (bot.bestEvaluation >= 1000003)
-            Console.WriteLine($"White mate in: {(Double)bot.bestEvaluation - 1000002}!");
-        else if (bot.bestEvaluation >= 1000001)
-            Console.WriteLine($"White mate in: {(Double)bot.bestEvaluation - 999999}!");
-        else if (bot.bestEvaluation <= -1000002)
-            Console.WriteLine($"Black mate in: {(Double)bot.bestEvaluation + 1000003}!");
-        else if (bot.bestEvaluation <= -1000000)
-            Console.WriteLine($"Black mate in: {(Double)bot.bestEvaluation + 1000002}!");
-
-        else
-        {
-            Console.WriteLine($"Evaluation: {(Double)bot.bestEvaluation / 100}");
-        }
-
-        Console.WriteLine($"BestEvaluation: {(Double)bot.bestEvaluation / 100}");
-    }
-
-    public void PrintDepth(Board board)
-    {
-        Console.WriteLine($"Searched Depth: {bot.searchDepth}");
     }
 }
