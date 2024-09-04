@@ -421,7 +421,7 @@ public class MyBot : IChessBot
 
         return structureScore;
     }
-    
+
 
     private int GetPieceValue(PieceType pieceType)
     {

@@ -4,7 +4,7 @@ using System.Numerics;
 using System;
 using System.Diagnostics;
 using System.Net.NetworkInformation;
-
+//v1.8
 public class MyBot : IChessBot
 {
     private const int SEARCH_DEPTH = 6;

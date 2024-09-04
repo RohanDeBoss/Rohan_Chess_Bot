@@ -1,13 +1,15 @@
 ﻿using ChessChallenge.API;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
+using System.Data;
 using System.Numerics;
-using System.Security.Cryptography.X509Certificates;
-//v2.3
-//Now I want by bot to detect forced mates and disply for current evaluation in ui + depth?.
-public class EvilBot : IChessBot
+
+//v2.4 Clean
+
+public class MyBot : IChessBot
 {
+    public int bestEvaluation { get; private set; }
+
     private int defultSearch = 3; //recomended 6
     public int searchDepth;
     private Move? chosenMove;
@@ -37,7 +39,7 @@ public class EvilBot : IChessBot
             {
                 searchDepth = defultSearch - 3;
             }
-            else if (timer.MillisecondsRemaining <= 25000)
+            else if (timer.MillisecondsRemaining <= 26000)
             {
                 searchDepth = defultSearch - 2;
             }
@@ -61,12 +63,10 @@ public class EvilBot : IChessBot
                 searchDepth = defultSearch + 1;
             }
         }
-
         Minimax(board, searchDepth, int.MinValue, int.MaxValue, board.IsWhiteToMove, true);
 
         return chosenMove ?? new Move(); // Return an empty move if no move is chosen
     }
-
 
 
     private void InitializeBitboards(Board board)
@@ -198,10 +198,7 @@ public class EvilBot : IChessBot
     20, 20,  0,  0,  0,  0, 20, 20,
     20, 30,  0,  0,  0,  0, 30, 20
 };
-    // King Endgame Table
-    int[] KingEndGameTable = new int[64]
-    {
-    // 1st rank (White's perspective)
+    private static readonly int[] KingEndGameTable = {
      0,  5,  5,  5,  5,  5,  5,  0,
      5, 10, 10, 10, 10, 10, 10,  5,
      5, 10, 20, 20, 20, 20, 10,  5,
@@ -257,7 +254,6 @@ public class EvilBot : IChessBot
         {
             return board.IsWhiteToMove ? -1000000 - depth : 1000000 + depth;
         }
-
         if (board.IsDraw())
         {
             return -40; // Negative score for draw
@@ -418,15 +414,14 @@ public class EvilBot : IChessBot
     private int CountMaterial(Board board, bool isWhite)
     {
         int material = 0;
-        ulong[] pieces = isWhite ? new[] { whitePawns, whiteKnights, whiteBishops, whiteRooks, whiteQueens, whiteKings } :
-                                    new[] { blackPawns, blackKnights, blackBishops, blackRooks, blackQueens, blackKings };
+        ulong[] pieces = isWhite ? new[] { whitePawns, whiteKnights, whiteBishops, whiteRooks, whiteQueens } :
+                                    new[] { blackPawns, blackKnights, blackBishops, blackRooks, blackQueens };
 
         material += CountBits(pieces[0]) * 100;  // Pawns
-        material += CountBits(pieces[1]) * 305;  // Knights
-        material += CountBits(pieces[2]) * 320;  // Bishops
+        material += CountBits(pieces[1]) * 315;  // Knights
+        material += CountBits(pieces[2]) * 330;  // Bishops
         material += CountBits(pieces[3]) * 500;  // Rooks
         material += CountBits(pieces[4]) * 900;  // Queens
-        material += CountBits(pieces[5]) * 9999;  // Kings
 
         return material;
     }
@@ -492,7 +487,7 @@ public class EvilBot : IChessBot
             _ => 0
         };
     }
-    int Minimax(Board board, int depth, int alpha, int beta, bool isMaximizing, bool isRoot)
+    public int Minimax(Board board, int depth, int alpha, int beta, bool isMaximizing, bool isRoot)
     {
         if (depth == 0 || board.IsInCheckmate() || board.IsDraw())
             return Evaluate(board, depth);
@@ -507,13 +502,11 @@ public class EvilBot : IChessBot
             int score1 = history.ContainsKey(m1) ? history[m1] : 0;
             int score2 = history.ContainsKey(m2) ? history[m2] : 0;
 
-            // Prioritize killer moves
             if (killerMoves.ContainsKey(m1))
                 score1 += 5000;
             if (killerMoves.ContainsKey(m2))
                 score2 += 5000;
 
-            // MVV-LVA scoring for captures
             score1 += GetMVVLVAScore(m1, board);
             score2 += GetMVVLVAScore(m2, board);
 
@@ -567,8 +560,12 @@ public class EvilBot : IChessBot
             }
         }
 
-        if (isRoot && bestMove.HasValue)
-            chosenMove = bestMove.Value;
+        if (isRoot)
+        {
+            this.bestEvaluation = bestEvaluation; // Store the best evaluation at the root level
+            if (bestMove.HasValue)
+                chosenMove = bestMove.Value;
+        }
 
         // Update history and killer moves
         if (bestMove.HasValue)
@@ -580,7 +577,7 @@ public class EvilBot : IChessBot
                 history[move] = 1;
 
             if (isRoot)
-                killerMoves[move] = 2; // Assign a value to killer move
+                killerMoves[move] = 2;
         }
 
         return bestEvaluation;

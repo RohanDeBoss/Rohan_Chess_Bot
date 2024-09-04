@@ -593,7 +593,6 @@ public class MyBot : IChessBot
 public class EvaluationDebugger
 {
     private MyBot bot;
-    private int Evaluate;
     public EvaluationDebugger(MyBot bot)
     {
         this.bot = bot;
@@ -615,8 +614,6 @@ public class EvaluationDebugger
         {
             Console.WriteLine($"Evaluation: {(Double)bot.bestEvaluation / 100}");
         }
-
-        Console.WriteLine($"BestEvaluation: {(Double)bot.bestEvaluation / 100}");
     }
 
     public void PrintDepth(Board board)

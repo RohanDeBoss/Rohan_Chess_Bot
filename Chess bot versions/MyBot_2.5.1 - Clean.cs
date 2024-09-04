@@ -4,8 +4,8 @@ using System.Collections.Generic;
 using System.Data;
 using System.Numerics;
 
-//v2.5.1 Time management
-//I need to fix the mate in thing.
+//v2.5.1 Clean
+
 public class MyBot : IChessBot
 {
     public int bestEvaluation { get; private set; }
@@ -68,13 +68,6 @@ public class MyBot : IChessBot
             }
         }
         Minimax(board, searchDepth, int.MinValue, int.MaxValue, board.IsWhiteToMove, true);
-
-
-        // Evaluation debugging - Uncomment the next line to see evaluation
-        EvaluationDebugger debugger = new(this);
-        debugger.PrintEvaluation(board); // This will output the evaluation
-        debugger.PrintDepth(board); // Same for depth
-
 
         return chosenMove ?? new Move(); // Return an empty move if no move is chosen
     }
@@ -421,7 +414,7 @@ public class MyBot : IChessBot
 
         return structureScore;
     }
-    
+
 
     private int GetPieceValue(PieceType pieceType)
     {
@@ -527,37 +520,5 @@ public class MyBot : IChessBot
         }
 
         return bestEvaluation;
-    }
-}
-public class EvaluationDebugger
-{
-    private MyBot bot;
-    public EvaluationDebugger(MyBot bot)
-    {
-        this.bot = bot;
-    }
-    public void PrintEvaluation(Board board)
-    {
-        //Attempt at writing mate in:
-
-        if (bot.bestEvaluation >= 1000003)
-            Console.WriteLine($"White mate in: {(Double)bot.bestEvaluation - 1000002}!");
-        else if (bot.bestEvaluation >= 1000001)
-            Console.WriteLine($"White mate in: {(Double)bot.bestEvaluation - 999999}!");
-        else if (bot.bestEvaluation <= -1000002)
-            Console.WriteLine($"Black mate in: {(Double)bot.bestEvaluation + 1000003}!");
-        else if (bot.bestEvaluation <= -1000000)
-            Console.WriteLine($"Black mate in: {(Double)bot.bestEvaluation + 1000002}!");
-
-        else
-        {
-            Console.WriteLine($"Evaluation: {(Double)bot.bestEvaluation / 100}");
-        }
-        Console.WriteLine($"EvaluationAlways: {(Double)bot.bestEvaluation}");
-    }
-
-    public void PrintDepth(Board board)
-    {
-        Console.WriteLine($"Searched Depth: {bot.searchDepth}");
     }
 }
