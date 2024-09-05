@@ -6,7 +6,7 @@ using System.Numerics;
 
 //v2.6 Clean
 //I need to fix the mate in thing.
-public class MyBot : IChessBot
+public class EvilBot : IChessBot
 {
     public int bestEvaluation { get; private set; }
 
@@ -101,7 +101,7 @@ public class MyBot : IChessBot
         score = 0;
         bestMove = default;
 
-        if (transpositionTable.TryGetValue(board.ZobristKey, out TranspositionEntry entry) && entry.Depth >= depth)
+        if (transpositionTable.TryGetValue(board.ZobristKey, out var entry) && entry.Depth >= depth)
         {
             score = entry.Score;
             bestMove = entry.BestMove;
@@ -249,8 +249,8 @@ public class MyBot : IChessBot
     -30,-40,-40,-50,-50,-40,-40,-30,
     -20,-30,-30,-40,-40,-30,-30,-20,
     -10,-20,-20,-20,-20,-20,-20,-10,
-    20, 20,  0,  0,  0,  0, 20, 20,
-    20, 30,  0,  0,  0,  0, 30, 20
+    20, 20,  0,  0, -15,-10, 20, 20,
+    20, 30,  0,  0,  0,  -10, 50, 20
 };
     private static readonly int[] KingEndGameTable = {
      0,  5,  5,  5,  5,  5,  5,  0,

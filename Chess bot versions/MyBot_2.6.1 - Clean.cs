@@ -4,14 +4,15 @@ using System.Collections.Generic;
 using System.Data;
 using System.Numerics;
 
-//v2.4 Clean
-
+//v2.6.1 Clean
+//I still need to fix the mate in thing.
 public class MyBot : IChessBot
 {
     public int bestEvaluation { get; private set; }
 
-    private int defultSearch = 3; //recomended 6
+    private int defultSearch = 5; //recomended 5
     public int searchDepth;
+    public int transpotitionsize = 2000000;
     private Move? chosenMove;
 
     // Data structures for move ordering
@@ -27,23 +28,23 @@ public class MyBot : IChessBot
     public Move Think(Board board, Timer timer)
     {
         InitializeBitboards(board);
-
+        transpositionTable.Clear(); // Clear the table at the start of each new move
         // Adjust search depth based on time remaining
         if (defultSearch > 4)
         {
-            if (timer.MillisecondsRemaining <= 1900)
+            if (timer.MillisecondsRemaining <= 800)
+            {
+                searchDepth = 1;
+            }
+            else if (timer.MillisecondsRemaining <= 3000)
             {
                 searchDepth = 2;
             }
-            else if (timer.MillisecondsRemaining <= 8000)
-            {
-                searchDepth = defultSearch - 3;
-            }
-            else if (timer.MillisecondsRemaining <= 26000)
+            else if (timer.MillisecondsRemaining <= 12000)
             {
                 searchDepth = defultSearch - 2;
             }
-            else if (timer.MillisecondsRemaining <= 56000)
+            else if (timer.MillisecondsRemaining <= 35000)
             {
                 searchDepth = defultSearch - 1;
             }
@@ -54,13 +55,13 @@ public class MyBot : IChessBot
         }
         else
         {
-            if (timer.MillisecondsRemaining <= 55000)
+            if (timer.MillisecondsRemaining >= 55000)
             {
-                searchDepth = defultSearch;
+                searchDepth = defultSearch + 1;
             }
             else
             {
-                searchDepth = defultSearch + 1;
+                searchDepth = defultSearch;
             }
         }
         Minimax(board, searchDepth, int.MinValue, int.MaxValue, board.IsWhiteToMove, true);
@@ -68,6 +69,57 @@ public class MyBot : IChessBot
         return chosenMove ?? new Move(); // Return an empty move if no move is chosen
     }
 
+    // Transpotition table
+    private class TranspositionEntry
+    {
+        public int Depth;
+        public int Score;
+        public Move BestMove;
+        public int NodeType; // 0: Exact, 1: Lower Bound, 2: Upper Bound
+    }
+
+    private Dictionary<ulong, TranspositionEntry> transpositionTable = new Dictionary<ulong, TranspositionEntry>();
+
+    private void StoreInTranspositionTable(Board board, int depth, int score, Move bestMove, int nodeType)
+    {
+        if (transpositionTable.Count >= transpotitionsize) // Limit table size
+            return;
+
+        transpositionTable[board.ZobristKey] = new TranspositionEntry
+        {
+            Depth = depth,
+            Score = score,
+            BestMove = bestMove,
+            NodeType = nodeType
+        };
+    }
+
+    private bool ProbeTranspositionTable(Board board, int depth, ref int alpha, ref int beta, out int score, out Move bestMove)
+    {
+        score = 0;
+        bestMove = default;
+
+        if (transpositionTable.TryGetValue(board.ZobristKey, out var entry) && entry.Depth >= depth)
+        {
+            score = entry.Score;
+            bestMove = entry.BestMove;
+
+            if (entry.NodeType == 0) // Exact score
+                return true;
+            if (entry.NodeType == 1 && score >= beta) // Lower bound
+                return true;
+            if (entry.NodeType == 2 && score <= alpha) // Upper bound
+                return true;
+
+            // Adjust alpha or beta
+            if (entry.NodeType == 1)
+                alpha = Math.Max(alpha, score);
+            else if (entry.NodeType == 2)
+                beta = Math.Min(beta, score);
+        }
+
+        return false;
+    }
 
     private void InitializeBitboards(Board board)
     {
@@ -168,13 +220,13 @@ public class MyBot : IChessBot
 
     private static readonly int[] RookTable = {
     -1, 0,  5, 9,  9,   5,  0, -1,
-    0,  5,  5, 10, 10,  5,  5,  0,
+    5,  10, 10, 15, 15, 10, 10, 5,
     0,  0,  5, 10, 10,  5,  0,  0,
     0,  0,  5, 10, 10,  5,  0,  0,
     0,  0,  5, 10, 10,  5,  0,  0,
     0,  0,  5, 10, 10,  5,  0,  0,
     0,  5,  5, 10, 10,  5,  5,  0,
-    -1, 0,  0,  0,  0,  0,  0, -1
+    -10, 0,  0,  0,  0,  0,  0, -10
 };
 
     private static readonly int[] QueenTable = {
@@ -195,57 +247,19 @@ public class MyBot : IChessBot
     -30,-40,-40,-50,-50,-40,-40,-30,
     -20,-30,-30,-40,-40,-30,-30,-20,
     -10,-20,-20,-20,-20,-20,-20,-10,
-    20, 20,  0,  0,  0,  0, 20, 20,
-    20, 30,  0,  0,  0,  0, 30, 20
+    20, 20,  0,  0, -15,-10, 20, 20,
+    20, 30,  0,  0,  0,  -10, 50, 20
 };
     private static readonly int[] KingEndGameTable = {
      0,  5,  5,  5,  5,  5,  5,  0,
-     5, 10, 10, 10, 10, 10, 10,  5,
-     5, 10, 20, 20, 20, 20, 10,  5,
-     5, 10, 20, 19, 19, 20, 10,  5,
-     5, 10, 20, 19, 19, 20, 10,  5,
+     0, 10, 10, 10, 10, 10, 10,  0,
+     0, 10, 20, 20, 20, 20, 10,  0,
+     0, 10, 21, 19, 19, 21, 10,  0,
+     0, 10, 20, 16, 16, 20, 10,  0,
      5, 10, 20, 20, 20, 20, 10,  5,
      5, 10, 10, 10, 10, 10, 10,  5,
      0,  5,  5,  5,  5,  5,  5,  0
     };
-
-    private int QuiescenceSearch(Board board, int alpha, int beta, bool isWhiteToMove)
-    {
-        int standPat = Evaluate(board, 0); // Static evaluation at the current position
-
-        if (standPat >= beta)
-        {
-            return beta;
-        }
-
-        if (standPat > alpha) alpha = standPat;
-        if (alpha >= beta) return alpha;
-
-        var legalMoves = board.GetLegalMoves();
-
-        foreach (var move in legalMoves)
-        {
-            if (move.IsCapture) // Only consider captures
-            {
-                board.MakeMove(move);
-                int score = -QuiescenceSearch(board, -beta, -alpha, !isWhiteToMove);
-                board.UndoMove(move);
-
-                if (score >= beta)
-                {
-                    return beta;
-                }
-
-                if (score > alpha)
-                {
-                    alpha = score;
-                }
-            }
-        }
-
-        return alpha;
-    }
-
 
     public int Evaluate(Board board, int depth)
     {
@@ -256,7 +270,11 @@ public class MyBot : IChessBot
         }
         if (board.IsDraw())
         {
-            return -40; // Negative score for draw
+            return -35; // Negative score for draw
+        }
+        if (board.IsRepeatedPosition())
+        {
+            return -10;
         }
 
         int material = 0;
@@ -264,15 +282,16 @@ public class MyBot : IChessBot
 
         // Material evaluation
         material += CountBits(whitePawns) * 100;
-        material += CountBits(whiteKnights) * 315;
-        material += CountBits(whiteBishops) * 330;
+        material += CountBits(whiteKnights) * 305;
+        material += CountBits(whiteBishops) * 320;
         material += CountBits(whiteRooks) * 500;
         material += CountBits(whiteQueens) * 900;
         material -= CountBits(blackPawns) * 100;
-        material -= CountBits(blackKnights) * 315;
-        material -= CountBits(blackBishops) * 330;
+        material -= CountBits(blackKnights) * 305;
+        material -= CountBits(blackBishops) * 320;
         material -= CountBits(blackRooks) * 500;
         material -= CountBits(blackQueens) * 900;
+
 
         // Positional evaluation using piece-square tables
         positional += EvaluatePieceSquareTables(whitePawns, PawnTable, true);
@@ -290,6 +309,8 @@ public class MyBot : IChessBot
         int whiteMaterial = CountMaterial(board, true);
         int blackMaterial = CountMaterial(board, false);
 
+
+
         if (whiteMaterial < 1750 || blackMaterial < 1750) // Endgame
         {
             positional += EvaluatePieceSquareTables(whiteKings, KingEndGameTable, true);
@@ -298,9 +319,7 @@ public class MyBot : IChessBot
         else // Middle game
         {
             positional += EvaluatePieceSquareTables(whiteKings, KingMiddleGameTable, true);
-            positional += CountPositionalBonus(whiteKings, 1, 1); // Bonus for king on 1st rank for White
             positional -= EvaluatePieceSquareTables(blackKings, KingMiddleGameTable, false);
-            positional -= CountPositionalBonus(blackKings, 8, 8); // Bonus for king on 8th rank for Black
         }
 
         // Passed pawn evaluation
@@ -310,13 +329,12 @@ public class MyBot : IChessBot
         // Adjust for check status
         if (board.IsInCheck())
         {
-            material += board.IsWhiteToMove ? -15 : 15;
+            material += board.IsWhiteToMove ? -16 : 16;
         }
 
         // Return the total evaluation score
         return material + positional;
     }
-
 
     int EvaluatePassedPawns(ulong myPawns, ulong opponentPawns, bool isWhite)
     {
@@ -328,7 +346,7 @@ public class MyBot : IChessBot
             int pawnSquare = BitOperations.TrailingZeroCount(passedPawns);
             int rank = isWhite ? pawnSquare / 8 + 1 : 8 - pawnSquare / 8;
             passedPawnBonus += (rank - 1) * 10;
-            passedPawns &= passedPawns - 1;
+            passedPawns &= passedPawns - 1; // Remove the lowest set bit
         }
 
         return passedPawnBonus;
@@ -337,18 +355,18 @@ public class MyBot : IChessBot
     ulong GetPassedPawns(ulong myPawns, ulong opponentPawns, bool isWhite)
     {
         ulong passedPawns = 0;
-        ulong adjacentFilesMask = 0xFF; // Example for file a
+        ulong fileMask = 0x0101010101010101UL; // Mask to isolate files
+
         for (int i = 0; i < 8; i++)
         {
-            ulong filePawns = myPawns & (adjacentFilesMask << i);
-            ulong opponentFilePawns = opponentPawns & (adjacentFilesMask << i);
+            ulong myFilePawns = myPawns & (fileMask << i);
+            ulong opponentFilePawns = opponentPawns & (fileMask << i);
             ulong noOpponentAhead = isWhite ? ~(opponentFilePawns >> 8) : ~(opponentFilePawns << 8);
-            passedPawns |= filePawns & noOpponentAhead;
+            passedPawns |= myFilePawns & noOpponentAhead;
         }
 
         return passedPawns;
     }
-
 
     int GetPawnRank(ulong pawn, bool isWhite)
     {
@@ -373,26 +391,9 @@ public class MyBot : IChessBot
         return pawnList;
     }
 
-
-
     private int CountBits(ulong bitboard)
     {
         return (int)BitOperations.PopCount(bitboard);
-    }
-
-    private int CountPositionalBonus(ulong bitboard, int minRank, int maxRank)
-    {
-        int bonus = 0;
-        for (int i = 0; i < 64; i++)
-        {
-            if ((bitboard & (1UL << i)) != 0)
-            {
-                int rank = i / 8 + 1;
-                if (rank >= minRank && rank <= maxRank)
-                    bonus += 2; // Positional bonus for the king
-            }
-        }
-        return bonus;
     }
 
     private int EvaluateEndgame(Board board)
@@ -418,8 +419,8 @@ public class MyBot : IChessBot
                                     new[] { blackPawns, blackKnights, blackBishops, blackRooks, blackQueens };
 
         material += CountBits(pieces[0]) * 100;  // Pawns
-        material += CountBits(pieces[1]) * 315;  // Knights
-        material += CountBits(pieces[2]) * 330;  // Bishops
+        material += CountBits(pieces[1]) * 305;  // Knights
+        material += CountBits(pieces[2]) * 320;  // Bishops
         material += CountBits(pieces[3]) * 500;  // Rooks
         material += CountBits(pieces[4]) * 900;  // Queens
 
@@ -442,7 +443,6 @@ public class MyBot : IChessBot
         return safety;
     }
 
-
     private int CountEndgamePawnStructure(ulong pawnsBitboard, bool isWhite)
     {
         int structureScore = 0;
@@ -464,15 +464,6 @@ public class MyBot : IChessBot
 
         return structureScore;
     }
-    private int GetMVVLVAScore(Move move, Board board)
-    {
-        if (!move.IsCapture) return 0;
-
-        int victimValue = GetPieceValue(board.GetPiece(move.TargetSquare).PieceType);
-        int attackerValue = GetPieceValue(board.GetPiece(move.StartSquare).PieceType);
-
-        return victimValue * 10 - attackerValue;
-    }
 
     private int GetPieceValue(PieceType pieceType)
     {
@@ -483,35 +474,67 @@ public class MyBot : IChessBot
             PieceType.Bishop => 3,
             PieceType.Rook => 5,
             PieceType.Queen => 9,
-            PieceType.King => 99999,
+            PieceType.King => 999,
             _ => 0
         };
     }
+    private void OrderMoves(Board board, List<Move> moves)
+    {
+        moves.Sort((m1, m2) => ScoreMove(board, m2) - ScoreMove(board, m1));
+    }
+
+    private int ScoreMove(Board board, Move move)
+    {
+        int score = 0;
+        // If it's a capture move, prioritize based on MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
+        if (move.IsCapture)
+        {
+            int victimValue = GetPieceValue(board.GetPiece(move.TargetSquare).PieceType);
+            int attackerValue = GetPieceValue(board.GetPiece(move.StartSquare).PieceType);
+            score += victimValue - attackerValue + 1000000; // High value to prioritize captures
+        }
+        // Prioritize killer moves
+        if (killerMoves.ContainsKey(move))
+        {
+            score += 5000; // Arbitrary bonus for killer moves
+        }
+
+        // Use history heuristic (assign a bonus based on move frequency)
+        if (history.ContainsKey(move))
+        {
+            score += history[move];
+        }
+
+        return score;
+    }
+
     public int Minimax(Board board, int depth, int alpha, int beta, bool isMaximizing, bool isRoot)
     {
+        Move ttMove = default; // Initialize ttMove with a default value
+
+        // Transposition table lookup
+        if (!isRoot && ProbeTranspositionTable(board, depth, ref alpha, ref beta, out int ttScore, out ttMove))
+        {
+            return ttScore;
+        }
+
         if (depth == 0 || board.IsInCheckmate() || board.IsDraw())
             return Evaluate(board, depth);
 
         int bestEvaluation;
         Move? bestMove = null;
+
         List<Move> moves = new List<Move>(board.GetLegalMoves());
+        OrderMoves(board, moves);
 
-        // Order moves based on previous success and captures
-        moves.Sort((m1, m2) =>
+        // Use ttMove if available
+        if (ttMove.RawValue != 0)
         {
-            int score1 = history.ContainsKey(m1) ? history[m1] : 0;
-            int score2 = history.ContainsKey(m2) ? history[m2] : 0;
+            moves.Remove(ttMove);
+            moves.Insert(0, ttMove);
+        }
 
-            if (killerMoves.ContainsKey(m1))
-                score1 += 5000;
-            if (killerMoves.ContainsKey(m2))
-                score2 += 5000;
-
-            score1 += GetMVVLVAScore(m1, board);
-            score2 += GetMVVLVAScore(m2, board);
-
-            return score2.CompareTo(score1);
-        });
+        int nodeType = 1; // Assume lower bound initially
 
         if (isMaximizing)
         {
@@ -533,7 +556,10 @@ public class MyBot : IChessBot
 
                 alpha = Math.Max(alpha, evaluation);
                 if (beta <= alpha)
+                {
+                    nodeType = 1; // Lower bound
                     break;
+                }
             }
         }
         else
@@ -556,10 +582,22 @@ public class MyBot : IChessBot
 
                 beta = Math.Min(beta, evaluation);
                 if (beta <= alpha)
-                    break;
+                    break; //Alpha cutoff
             }
         }
 
+        // Store position in transposition table
+        if (bestMove.HasValue)
+        {
+            if (bestEvaluation <= alpha)
+                nodeType = 2; // Upper bound
+            else if (bestEvaluation >= beta)
+                nodeType = 1; // Lower bound
+            else
+                nodeType = 0; // Exact score
+
+            StoreInTranspositionTable(board, depth, bestEvaluation, bestMove.Value, nodeType);
+        }
         if (isRoot)
         {
             this.bestEvaluation = bestEvaluation; // Store the best evaluation at the root level

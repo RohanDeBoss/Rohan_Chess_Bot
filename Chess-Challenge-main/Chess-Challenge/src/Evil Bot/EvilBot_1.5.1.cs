@@ -4,13 +4,13 @@ using System.Collections.Generic;
 using System.Data;
 using System.Numerics;
 
-//v2.5.1 Clean
-
+//v2.6 Clean
+//I need to fix the mate in thing.
 public class EvilBot : IChessBot
 {
     public int bestEvaluation { get; private set; }
 
-    private int defultSearch = 6; //recomended 5
+    private int defultSearch = 5; //recomended 5
     public int searchDepth;
     private Move? chosenMove;
 
@@ -27,7 +27,7 @@ public class EvilBot : IChessBot
     public Move Think(Board board, Timer timer)
     {
         InitializeBitboards(board);
-
+        transpositionTable.Clear(); // Clear the table at the start of each new move
         // Adjust search depth based on time remaining
         if (defultSearch > 4)
         {
@@ -71,7 +71,57 @@ public class EvilBot : IChessBot
 
         return chosenMove ?? new Move(); // Return an empty move if no move is chosen
     }
+    // Transpotition table
+    private class TranspositionEntry
+    {
+        public int Depth;
+        public int Score;
+        public Move BestMove;
+        public int NodeType; // 0: Exact, 1: Lower Bound, 2: Upper Bound
+    }
 
+    private Dictionary<ulong, TranspositionEntry> transpositionTable = new Dictionary<ulong, TranspositionEntry>();
+
+    private void StoreInTranspositionTable(Board board, int depth, int score, Move bestMove, int nodeType)
+    {
+        if (transpositionTable.Count >= 10000000) // Limit table size
+            return;
+
+        transpositionTable[board.ZobristKey] = new TranspositionEntry
+        {
+            Depth = depth,
+            Score = score,
+            BestMove = bestMove,
+            NodeType = nodeType
+        };
+    }
+
+    private bool ProbeTranspositionTable(Board board, int depth, ref int alpha, ref int beta, out int score, out Move bestMove)
+    {
+        score = 0;
+        bestMove = default;
+
+        if (transpositionTable.TryGetValue(board.ZobristKey, out var entry) && entry.Depth >= depth)
+        {
+            score = entry.Score;
+            bestMove = entry.BestMove;
+
+            if (entry.NodeType == 0) // Exact score
+                return true;
+            if (entry.NodeType == 1 && score >= beta) // Lower bound
+                return true;
+            if (entry.NodeType == 2 && score <= alpha) // Upper bound
+                return true;
+
+            // Adjust alpha or beta
+            if (entry.NodeType == 1)
+                alpha = Math.Max(alpha, score);
+            else if (entry.NodeType == 2)
+                beta = Math.Min(beta, score);
+        }
+
+        return false;
+    }
 
     private void InitializeBitboards(Board board)
     {
@@ -199,8 +249,8 @@ public class EvilBot : IChessBot
     -30,-40,-40,-50,-50,-40,-40,-30,
     -20,-30,-30,-40,-40,-30,-30,-20,
     -10,-20,-20,-20,-20,-20,-20,-10,
-    20, 20,  0,  0,  0,  0, 20, 20,
-    20, 30,  0,  0,  0,  0, 30, 20
+    20, 20,  0,  0, -15,-10, 20, 20,
+    20, 30,  0,  0,  0,  -10, 50, 20
 };
     private static readonly int[] KingEndGameTable = {
      0,  5,  5,  5,  5,  5,  5,  0,
@@ -431,6 +481,14 @@ public class EvilBot : IChessBot
     }
     public int Minimax(Board board, int depth, int alpha, int beta, bool isMaximizing, bool isRoot)
     {
+        Move ttMove = default; // Initialize ttMove with a default value
+
+        // Transposition table lookup
+        if (!isRoot && ProbeTranspositionTable(board, depth, ref alpha, ref beta, out int ttScore, out ttMove))
+        {
+            return ttScore;
+        }
+
         if (depth == 0 || board.IsInCheckmate() || board.IsDraw())
             return Evaluate(board, depth);
 
@@ -438,6 +496,12 @@ public class EvilBot : IChessBot
         Move? bestMove = null;
         List<Move> moves = new List<Move>(board.GetLegalMoves());
 
+        // Use ttMove if available
+        if (ttMove.RawValue != 0)
+        {
+            moves.Remove(ttMove);
+            moves.Insert(0, ttMove);
+        }
         // Order moves based on previous success and captures
         moves.Sort((m1, m2) =>
         {
@@ -451,6 +515,8 @@ public class EvilBot : IChessBot
 
             return score2.CompareTo(score1);
         });
+
+        int nodeType = 1; // Assume lower bound initially
 
         if (isMaximizing)
         {
@@ -472,7 +538,10 @@ public class EvilBot : IChessBot
 
                 alpha = Math.Max(alpha, evaluation);
                 if (beta <= alpha)
+                {
+                    nodeType = 1; // Lower bound
                     break;
+                }
             }
         }
         else
@@ -498,7 +567,18 @@ public class EvilBot : IChessBot
                     break;
             }
         }
+        // Store position in transposition table
+        if (bestMove.HasValue)
+        {
+            if (bestEvaluation <= alpha)
+                nodeType = 2; // Upper bound
+            else if (bestEvaluation >= beta)
+                nodeType = 1; // Lower bound
+            else
+                nodeType = 0; // Exact score
 
+            StoreInTranspositionTable(board, depth, bestEvaluation, bestMove.Value, nodeType);
+        }
         if (isRoot)
         {
             this.bestEvaluation = bestEvaluation; // Store the best evaluation at the root level
