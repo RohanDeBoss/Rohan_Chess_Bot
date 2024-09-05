@@ -1,14 +1,17 @@
 ﻿using ChessChallenge.API;
-using Raylib_cs;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
+using System.Data;
 using System.Numerics;
 
-//v1.5.1
+//v2.5.1 Clean
+
 public class EvilBot : IChessBot
 {
-    private const int SEARCH_DEPTH = 3;
+    public int bestEvaluation { get; private set; }
+
+    private int defultSearch = 6; //recomended 5
+    public int searchDepth;
     private Move? chosenMove;
 
     // Data structures for move ordering
@@ -24,9 +27,51 @@ public class EvilBot : IChessBot
     public Move Think(Board board, Timer timer)
     {
         InitializeBitboards(board);
-        Minimax(board, SEARCH_DEPTH, int.MinValue, int.MaxValue, board.IsWhiteToMove, true);
+
+        // Adjust search depth based on time remaining
+        if (defultSearch > 4)
+        {
+            if (timer.MillisecondsRemaining <= 800)
+            {
+                searchDepth = 1;
+            }
+            else if (timer.MillisecondsRemaining <= 4000)
+            {
+                searchDepth = 2;
+            }
+            else if (timer.MillisecondsRemaining <= 14000)
+            {
+                searchDepth = defultSearch - 2;
+            }
+            else if (timer.MillisecondsRemaining <= 35000)
+            {
+                searchDepth = defultSearch - 1;
+            }
+            else if (timer.MillisecondsRemaining >= 58000)
+            {
+                searchDepth = defultSearch - 1; //first few moves done quickly
+            }
+            else
+            {
+                searchDepth = defultSearch;
+            }
+        }
+        else
+        {
+            if (timer.MillisecondsRemaining >= 55000)
+            {
+                searchDepth = defultSearch + 1;
+            }
+            else
+            {
+                searchDepth = defultSearch;
+            }
+        }
+        Minimax(board, searchDepth, int.MinValue, int.MaxValue, board.IsWhiteToMove, true);
+
         return chosenMove ?? new Move(); // Return an empty move if no move is chosen
     }
+
 
     private void InitializeBitboards(Board board)
     {
@@ -104,44 +149,44 @@ public class EvilBot : IChessBot
 };
 
     private static readonly int[] KnightTable = {
-    -50,-40,-30,-30,-30,-30,-40,-50,
+    -50,-45,-30,-30,-30,-30,-45,-50,
     -40,-20,  0,  0,  0,  0,-20,-40,
     -30,  0, 15, 15, 15, 15,  0,-30,
     -30,  5, 15, 20, 20, 15,  5,-30,
     -30,  0, 15, 20, 20, 15,  0,-30,
     -30,  5, 15, 15, 15, 15,  5,-30,
     -40,-20,  0,  5,  5,  0,-20,-40,
-    -50,-40,-30,-30,-30,-30,-40,-50
+    -50,-45,-30,-30,-30,-30,-45,-50
 };
 
     private static readonly int[] BishopTable = {
-    -20,-10,-10,-10,-10,-10,-10,-20,
+    -20,-10,-15,-10,-10,-15,-10,-20,
     -10,  0,  0,  0,  0,  0,  0,-10,
     -10,  0,  5, 10, 10,  5,  0,-10,
     -10,  5,  5, 10, 10,  5,  5,-10,
     -10,  0, 10, 10, 10, 10,  0,-10,
     -10, 10, 10, 10, 10, 10, 10,-10,
     -10,  5,  0,  0,  0,  0,  5,-10,
-    -20,-10,-10,-10,-10,-10,-10,-20
+    -20,-10,-15,-10,-10,-15,-10,-20
 };
 
     private static readonly int[] RookTable = {
+    -1, 0,  5, 9,  9,   5,  0, -1,
+    5,  10, 10, 15, 15, 10, 10, 5,
     0,  0,  5, 10, 10,  5,  0,  0,
     0,  0,  5, 10, 10,  5,  0,  0,
     0,  0,  5, 10, 10,  5,  0,  0,
     0,  0,  5, 10, 10,  5,  0,  0,
-    0,  0,  5, 10, 10,  5,  0,  0,
-    0,  0,  5, 10, 10,  5,  0,  0,
-    0,  0,  5, 10, 10,  5,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0
+    0,  5,  5, 10, 10,  5,  5,  0,
+    -10, 0,  0,  0,  0,  0,  0, -10
 };
 
     private static readonly int[] QueenTable = {
     -20,-10,-10, -5, -5,-10,-10,-20,
     -10,  0,  0,  0,  0,  0,  0,-10,
     -10,  0,  5,  5,  5,  5,  0,-10,
-    -5,  0,  5,  5,  5,  5,  0, -5,
-    0,  0,  5,  5,  5,  5,  0, -5,
+    -5,   0,  5,  5,  5,  5,  0, -5,
+     0,   0,  5,  5,  5,  5,  0, -5,
     -10,  5,  5,  5,  5,  5,  0,-10,
     -10,  0,  5,  0,  0,  0,  0,-10,
     -20,-10,-10, -5, -5,-10,-10,-20
@@ -155,32 +200,43 @@ public class EvilBot : IChessBot
     -20,-30,-30,-40,-40,-30,-30,-20,
     -10,-20,-20,-20,-20,-20,-20,-10,
     20, 20,  0,  0,  0,  0, 20, 20,
-    20, 30, 10,  0,  0, 10, 30, 20
+    20, 30,  0,  0,  0,  0, 30, 20
 };
+    private static readonly int[] KingEndGameTable = {
+     0,  5,  5,  5,  5,  5,  5,  0,
+     0, 10, 10, 10, 10, 10, 10,  0,
+     0, 10, 20, 20, 20, 20, 10,  0,
+     0, 10, 20, 19, 19, 20, 10,  0,
+     0, 10, 20, 19, 19, 20, 10,  0,
+     5, 10, 20, 20, 20, 20, 10,  5,
+     5, 10, 10, 10, 10, 10, 10,  5,
+     0,  5,  5,  5,  5,  5,  5,  0
+    };
 
-    int Evaluate(Board board, int depth)
+    public int Evaluate(Board board, int depth)
     {
+        // Checkmate and draw evaluations
         if (board.IsInCheckmate())
         {
             return board.IsWhiteToMove ? -1000000 - depth : 1000000 + depth;
         }
-
         if (board.IsDraw())
         {
-            return -50;
+            return -40; // Negative score for draw
         }
 
         int material = 0;
         int positional = 0;
 
+        // Material evaluation
         material += CountBits(whitePawns) * 100;
-        material += CountBits(whiteKnights) * 315;
-        material += CountBits(whiteBishops) * 330;
+        material += CountBits(whiteKnights) * 305;
+        material += CountBits(whiteBishops) * 320;
         material += CountBits(whiteRooks) * 500;
         material += CountBits(whiteQueens) * 900;
         material -= CountBits(blackPawns) * 100;
-        material -= CountBits(blackKnights) * 315;
-        material -= CountBits(blackBishops) * 330;
+        material -= CountBits(blackKnights) * 305;
+        material -= CountBits(blackBishops) * 320;
         material -= CountBits(blackRooks) * 500;
         material -= CountBits(blackQueens) * 900;
 
@@ -190,44 +246,103 @@ public class EvilBot : IChessBot
         positional += EvaluatePieceSquareTables(whiteBishops, BishopTable, true);
         positional += EvaluatePieceSquareTables(whiteRooks, RookTable, true);
         positional += EvaluatePieceSquareTables(whiteQueens, QueenTable, true);
-        positional += EvaluatePieceSquareTables(whiteKings, KingMiddleGameTable, true);
-        positional += CountPositionalBonus(whiteKings, 1, 1); // Bonus for king on 1st rank for White
-
         positional -= EvaluatePieceSquareTables(blackPawns, PawnTable, false);
         positional -= EvaluatePieceSquareTables(blackKnights, KnightTable, false);
         positional -= EvaluatePieceSquareTables(blackBishops, BishopTable, false);
         positional -= EvaluatePieceSquareTables(blackRooks, RookTable, false);
         positional -= EvaluatePieceSquareTables(blackQueens, QueenTable, false);
-        positional -= EvaluatePieceSquareTables(blackKings, KingMiddleGameTable, false);
-        positional -= CountPositionalBonus(blackKings, 8, 8); // Bonus for king on 8th rank for Black
 
-        if (board.IsInCheck())
+        // King evaluation based on game phase
+        int whiteMaterial = CountMaterial(board, true);
+        int blackMaterial = CountMaterial(board, false);
+
+
+        if (whiteMaterial < 1750 || blackMaterial < 1750) // Endgame
         {
-            material += board.IsWhiteToMove ? -15 : 15;
+            positional += EvaluatePieceSquareTables(whiteKings, KingEndGameTable, true);
+            positional -= EvaluatePieceSquareTables(blackKings, KingEndGameTable, false);
+        }
+        else // Middle game
+        {
+            positional += EvaluatePieceSquareTables(whiteKings, KingMiddleGameTable, true);
+            positional -= EvaluatePieceSquareTables(blackKings, KingMiddleGameTable, false);
         }
 
+        // Passed pawn evaluation
+        positional += EvaluatePassedPawns(whitePawns, blackPawns, true);
+        positional -= EvaluatePassedPawns(blackPawns, whitePawns, false);
+
+        // Adjust for check status
+        if (board.IsInCheck())
+        {
+            material += board.IsWhiteToMove ? -20 : 20;
+        }
+
+        // Return the total evaluation score
         return material + positional;
     }
+
+
+    int EvaluatePassedPawns(ulong myPawns, ulong opponentPawns, bool isWhite)
+    {
+        int passedPawnBonus = 0;
+        ulong passedPawns = GetPassedPawns(myPawns, opponentPawns, isWhite);
+
+        while (passedPawns != 0)
+        {
+            int pawnSquare = BitOperations.TrailingZeroCount(passedPawns);
+            int rank = isWhite ? pawnSquare / 8 + 1 : 8 - pawnSquare / 8;
+            passedPawnBonus += (rank - 1) * 10;
+            passedPawns &= passedPawns - 1; // Remove the lowest set bit
+        }
+
+        return passedPawnBonus;
+    }
+
+    ulong GetPassedPawns(ulong myPawns, ulong opponentPawns, bool isWhite)
+    {
+        ulong passedPawns = 0;
+        ulong fileMask = 0x0101010101010101UL; // Mask to isolate files
+
+        for (int i = 0; i < 8; i++)
+        {
+            ulong myFilePawns = myPawns & (fileMask << i);
+            ulong opponentFilePawns = opponentPawns & (fileMask << i);
+            ulong noOpponentAhead = isWhite ? ~(opponentFilePawns >> 8) : ~(opponentFilePawns << 8);
+            passedPawns |= myFilePawns & noOpponentAhead;
+        }
+
+        return passedPawns;
+    }
+
+    int GetPawnRank(ulong pawn, bool isWhite)
+    {
+        int rank = 0;
+        int squareIndex = BitOperations.TrailingZeroCount(pawn);
+        rank = (squareIndex / 8) + 1;
+        return isWhite ? rank : 9 - rank; // Flip rank for black
+    }
+
+    IEnumerable<ulong> GetPawnBitboards(ulong pawns)
+    {
+        // Convert bitboard to individual pawn bitboards
+        List<ulong> pawnList = new List<ulong>();
+
+        while (pawns != 0)
+        {
+            ulong lsb = pawns & (~pawns + 1);
+            pawnList.Add(lsb);
+            pawns &= pawns - 1; // Clear LSB
+        }
+
+        return pawnList;
+    }
+
 
 
     private int CountBits(ulong bitboard)
     {
         return (int)BitOperations.PopCount(bitboard);
-    }
-
-    private int CountPositionalBonus(ulong bitboard, int minRank, int maxRank)
-    {
-        int bonus = 0;
-        for (int i = 0; i < 64; i++)
-        {
-            if ((bitboard & (1UL << i)) != 0)
-            {
-                int rank = i / 8 + 1;
-                if (rank >= minRank && rank <= maxRank)
-                    bonus += 2; // Positional bonus for the king
-            }
-        }
-        return bonus;
     }
 
     private int EvaluateEndgame(Board board)
@@ -237,7 +352,7 @@ public class EvilBot : IChessBot
 
         int endgameScore = 0;
 
-        if (whiteMaterial < 1800 || blackMaterial < 1800) // Arbitrary endgame threshold
+        if (whiteMaterial < 1750 || blackMaterial < 1750) // Arbitrary endgame threshold
         {
             endgameScore += CountEndgameKingSafety(whiteKings, true) - CountEndgameKingSafety(blackKings, false);
             endgameScore += CountEndgamePawnStructure(whitePawns, true) - CountEndgamePawnStructure(blackPawns, false);
@@ -249,73 +364,24 @@ public class EvilBot : IChessBot
     private int CountMaterial(Board board, bool isWhite)
     {
         int material = 0;
-        ulong[] pieces = isWhite ? new[] { whitePawns, whiteKnights, whiteBishops, whiteRooks, whiteQueens, whiteKings } :
-                                    new[] { blackPawns, blackKnights, blackBishops, blackRooks, blackQueens, blackKings };
+        ulong[] pieces = isWhite ? new[] { whitePawns, whiteKnights, whiteBishops, whiteRooks, whiteQueens } :
+                                    new[] { blackPawns, blackKnights, blackBishops, blackRooks, blackQueens };
 
         material += CountBits(pieces[0]) * 100;  // Pawns
-        material += CountBits(pieces[1]) * 320;  // Knights
-        material += CountBits(pieces[2]) * 330;  // Bishops
+        material += CountBits(pieces[1]) * 305;  // Knights
+        material += CountBits(pieces[2]) * 320;  // Bishops
         material += CountBits(pieces[3]) * 500;  // Rooks
         material += CountBits(pieces[4]) * 900;  // Queens
 
         return material;
     }
 
-    private struct TTEntry
-    {
-        public ulong ZobristKey;
-        public int Depth;
-        public int Score;
-        public Move BestMove;
-        public byte Flag; // 0 = exact, 1 = lower bound, 2 = upper bound
-    }
-    private const int TT_SIZE = 1 << 24; // 16 million entries
-    private TTEntry[] transpositionTable = new TTEntry[TT_SIZE];
-    private ulong[,] zobristTable = new ulong[12, 64];
-    private ulong sideToMove;
-
-    private void InitializeZobristTable()
-    {
-        Random rand = new Random(1234); // Use a fixed seed for reproducibility
-        for (int piece = 0; piece < 12; piece++)
-        {
-            for (int square = 0; square < 64; square++)
-            {
-                zobristTable[piece, square] = (ulong)rand.NextInt64();
-            }
-        }
-        sideToMove = (ulong)rand.NextInt64();
-    }
-
-    private ulong ComputeZobristKey(Board board)
-    {
-        ulong key = 0;
-        for (int square = 0; square < 64; square++)
-        {
-            Piece piece = board.GetPiece(new Square(square));
-            if (piece.PieceType != PieceType.None)
-            {
-                int pieceIndex = GetBitboardIndex(piece);
-                key ^= zobristTable[pieceIndex, square];
-            }
-        }
-        if (board.IsWhiteToMove)
-            key ^= sideToMove;
-        return key;
-    }
     private int CountEndgameKingSafety(ulong kingBitboard, bool isWhite)
     {
         int safety = 0;
 
         // Define masks for central and edge squares
-        ulong centralSquares = 0x0000001818000000UL; // Central 4 squares
-        ulong edgeSquares = 0x00FF000000FF00FFUL;    // Edge squares
-
-        // Check if the king is on the central squares
-        if ((kingBitboard & centralSquares) != 0)
-        {
-            safety += isWhite ? 10 : -10;
-        }
+        ulong edgeSquares = 0x00FF000000FF00FFUL; // Edge squares
 
         // Check if the king is on the edge squares
         if ((kingBitboard & edgeSquares) != 0)
@@ -338,25 +404,17 @@ public class EvilBot : IChessBot
             ulong filePawns = pawnsBitboard & (isolatedPawnsMask << i);
             if (CountBits(filePawns) > 1) // Doubled pawns
             {
-                structureScore -= isWhite ? 15 : -15;
+                structureScore -= isWhite ? 14 : -14;
             }
             else if (filePawns == 0) // Isolated pawns
             {
-                structureScore -= isWhite ? 15 : -15;
+                structureScore -= isWhite ? 20 : -20;
             }
         }
 
         return structureScore;
     }
-    private int GetMVVLVAScore(Move move, Board board)
-    {
-        if (!move.IsCapture) return 0;
 
-        int victimValue = GetPieceValue(board.GetPiece(move.TargetSquare).PieceType);
-        int attackerValue = GetPieceValue(board.GetPiece(move.StartSquare).PieceType);
-
-        return victimValue * 10 - attackerValue;
-    }
 
     private int GetPieceValue(PieceType pieceType)
     {
@@ -367,11 +425,11 @@ public class EvilBot : IChessBot
             PieceType.Bishop => 3,
             PieceType.Rook => 5,
             PieceType.Queen => 9,
-            PieceType.King => 1000,
+            PieceType.King => 999,
             _ => 0
         };
     }
-    int Minimax(Board board, int depth, int alpha, int beta, bool isMaximizing, bool isRoot)
+    public int Minimax(Board board, int depth, int alpha, int beta, bool isMaximizing, bool isRoot)
     {
         if (depth == 0 || board.IsInCheckmate() || board.IsDraw())
             return Evaluate(board, depth);
@@ -386,15 +444,10 @@ public class EvilBot : IChessBot
             int score1 = history.ContainsKey(m1) ? history[m1] : 0;
             int score2 = history.ContainsKey(m2) ? history[m2] : 0;
 
-            // Prioritize killer moves
             if (killerMoves.ContainsKey(m1))
                 score1 += 5000;
             if (killerMoves.ContainsKey(m2))
                 score2 += 5000;
-
-            // MVV-LVA scoring for captures
-            score1 += GetMVVLVAScore(m1, board);
-            score2 += GetMVVLVAScore(m2, board);
 
             return score2.CompareTo(score1);
         });
@@ -446,8 +499,12 @@ public class EvilBot : IChessBot
             }
         }
 
-        if (isRoot && bestMove.HasValue)
-            chosenMove = bestMove.Value;
+        if (isRoot)
+        {
+            this.bestEvaluation = bestEvaluation; // Store the best evaluation at the root level
+            if (bestMove.HasValue)
+                chosenMove = bestMove.Value;
+        }
 
         // Update history and killer moves
         if (bestMove.HasValue)
@@ -459,7 +516,7 @@ public class EvilBot : IChessBot
                 history[move] = 1;
 
             if (isRoot)
-                killerMoves[move] = 1; // Assign a value to killer move
+                killerMoves[move] = 2;
         }
 
         return bestEvaluation;

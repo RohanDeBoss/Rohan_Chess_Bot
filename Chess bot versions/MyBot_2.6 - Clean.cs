@@ -10,7 +10,7 @@ public class MyBot : IChessBot
 {
     public int bestEvaluation { get; private set; }
 
-    private int defultSearch = 6; //recomended 5
+    private int defultSearch = 5; //recomended 5
     public int searchDepth;
     private Move? chosenMove;
 
