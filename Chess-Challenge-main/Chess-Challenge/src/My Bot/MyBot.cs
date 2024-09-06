@@ -1,46 +1,68 @@
 ﻿using ChessChallenge.API;
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Numerics;
 
-//v2.6.2 Tweaks and redundant code removal
+//v2.6.1 Better?
 //I still need to fix the mate in thing.
 public class MyBot : IChessBot
 {
     public int bestEvaluation { get; private set; }
+
     private int defultSearch = 5; //recomended 5
     public int searchDepth;
     public int transpotitionsize = 2000000;
     private Move? chosenMove;
 
-    private Dictionary<Move, int> killerMoves = new();
-    private Dictionary<Move, int> history = new();
-    private ulong[] bitboards = new ulong[12];
+    // Data structures for move ordering
+    private Dictionary<Move, int> killerMoves = new Dictionary<Move, int>();
+    private Dictionary<Move, int> history = new Dictionary<Move, int>();
 
     // Bitboards
     private ulong whitePawns, whiteKnights, whiteBishops, whiteRooks, whiteQueens, whiteKings;
     private ulong blackPawns, blackKnights, blackBishops, blackRooks, blackQueens, blackKings;
 
+    private ulong[] bitboards = new ulong[12]; // 0-5: White pieces, 6-11: Black pieces
+
     public Move Think(Board board, Timer timer)
     {
         InitializeBitboards(board);
-        transpositionTable.Clear();
-
-        // Adjust search depth based on remaining time
+        transpositionTable.Clear(); // Clear the table at the start of each new move
+        // Adjust search depth based on time remaining
         if (defultSearch > 4)
         {
-            searchDepth = timer.MillisecondsRemaining switch
+            if (timer.MillisecondsRemaining <= 800)
             {
-                <= 800 => 1,
-                <= 3200 => 2,
-                <= 10500 => defultSearch - 2,
-                <= 29000 => defultSearch - 1,
-                _ => defultSearch
-            };
+                searchDepth = 1;
+            }
+            else if (timer.MillisecondsRemaining <= 3200)
+            {
+                searchDepth = 2;
+            }
+            else if (timer.MillisecondsRemaining <= 10500)
+            {
+                searchDepth = defultSearch - 2;
+            }
+            else if (timer.MillisecondsRemaining <= 29000)
+            {
+                searchDepth = defultSearch - 1;
+            }
+            else
+            {
+                searchDepth = defultSearch;
+            }
         }
         else
         {
-            searchDepth = timer.MillisecondsRemaining >= 55000 ? defultSearch + 1 : defultSearch;
+            if (timer.MillisecondsRemaining >= 55000)
+            {
+                searchDepth = defultSearch + 1;
+            }
+            else
+            {
+                searchDepth = defultSearch;
+            }
         }
         Minimax(board, searchDepth, int.MinValue, int.MaxValue, board.IsWhiteToMove, true);
 
@@ -54,8 +76,10 @@ public class MyBot : IChessBot
     // Transpotition table
     private class TranspositionEntry
     {
-        public int Depth, Score, NodeType;
+        public int Depth;
+        public int Score;
         public Move BestMove;
+        public int NodeType; // 0: Exact, 1: Lower Bound, 2: Upper Bound
     }
 
     private Dictionary<ulong, TranspositionEntry> transpositionTable = new Dictionary<ulong, TranspositionEntry>();
@@ -353,29 +377,6 @@ public class MyBot : IChessBot
         return passedPawns;
     }
 
-    int GetPawnRank(ulong pawn, bool isWhite)
-    {
-        int rank = 0;
-        int squareIndex = BitOperations.TrailingZeroCount(pawn);
-        rank = (squareIndex / 8) + 1;
-        return isWhite ? rank : 9 - rank; // Flip rank for black
-    }
-
-    IEnumerable<ulong> GetPawnBitboards(ulong pawns)
-    {
-        // Convert bitboard to individual pawn bitboards
-        List<ulong> pawnList = new List<ulong>();
-
-        while (pawns != 0)
-        {
-            ulong lsb = pawns & (~pawns + 1);
-            pawnList.Add(lsb);
-            pawns &= pawns - 1; // Clear LSB
-        }
-
-        return pawnList;
-    }
-
     private int CountBits(ulong bitboard)
     {
         return (int)BitOperations.PopCount(bitboard);
@@ -463,14 +464,9 @@ public class MyBot : IChessBot
             _ => 0
         };
     }
-    private void UpdateHistoryTable(Move move, int depth)
+    private void OrderMoves(Board board, List<Move> moves)
     {
-        if (!history.ContainsKey(move))
-        {
-            history[move] = 0;
-        }
-        // Reward moves that cause beta cutoffs (successful pruning)
-        history[move] += depth * depth;
+        moves.Sort((m1, m2) => ScoreMove(board, m2) - ScoreMove(board, m1));
     }
 
     private int ScoreMove(Board board, Move move)
@@ -498,16 +494,6 @@ public class MyBot : IChessBot
 
         return score;
     }
-    private void SortMoves(Board board, List<Move> moves)
-    {
-        // Sort moves based on history table values (descending order)
-        moves.Sort((move1, move2) =>
-        {
-            history.TryGetValue(move2, out int score2);
-            history.TryGetValue(move1, out int score1);
-            return score2.CompareTo(score1); // Higher scores come first
-        });
-    }
 
     public int Minimax(Board board, int depth, int alpha, int beta, bool isMaximizing, bool isRoot)
     {
@@ -526,7 +512,7 @@ public class MyBot : IChessBot
         Move? bestMove = null;
 
         List<Move> moves = new List<Move>(board.GetLegalMoves());
-        SortMoves(board, moves);
+        OrderMoves(board, moves);
 
         // Use ttMove if available
         if (ttMove.RawValue != 0)

@@ -104,14 +104,9 @@ public class EvilBot : IChessBot
             score = entry.Score;
             bestMove = entry.BestMove;
 
-            if (entry.NodeType == 0) // Exact score
-                return true;
-            if (entry.NodeType == 1 && score >= beta) // Lower bound
-                return true;
-            if (entry.NodeType == 2 && score <= alpha) // Upper bound
+            if (entry.NodeType == 0 || (entry.NodeType == 1 && score >= beta) || (entry.NodeType == 2 && score <= alpha))
                 return true;
 
-            // Adjust alpha or beta
             if (entry.NodeType == 1)
                 alpha = Math.Max(alpha, score);
             else if (entry.NodeType == 2)
@@ -187,15 +182,14 @@ public class EvilBot : IChessBot
     // Piece-square tables
     private static readonly int[] PawnTable = {
     0,  0,  0,  0,  0,  0,  0,  0,
-    10, 10, 10, 10, 10, 10, 10, 10,
+    10, 10,10, 15, 15, 10, 10, 10,
     5,  5, 10, 20, 20, 10,  5,  5,
     0,  0,  0, 15, 15,  0,  0,  0,
-    0,  0,  0, 10, 10,  0,  0,  0,
-    5, -5,-10,  0,  0,-10, -5,  5,
+    0,  0,  5, 10, 15, -10, 0,  0,
+    5, -5,-10,  0,  0,-10,  5,  5,
     5, 10, 10,-20,-20, 10, 10,  5,
     0,  0,  0,  0,  0,  0,  0,  0
 };
-
     private static readonly int[] KnightTable = {
     -50,-45,-30,-30,-30,-30,-45,-50,
     -40,-20,  0,  0,  0,  0,-20,-40,
@@ -204,20 +198,18 @@ public class EvilBot : IChessBot
     -30,  0, 15, 20, 20, 15,  0,-30,
     -30,  5, 15, 15, 15, 15,  5,-30,
     -40,-20,  0,  5,  5,  0,-20,-40,
-    -50,-45,-30,-30,-30,-30,-45,-50
+    -50,-20,-30,-30,-30,-30,-20,-50
 };
-
     private static readonly int[] BishopTable = {
     -20,-10,-15,-10,-10,-15,-10,-20,
     -10,  0,  0,  0,  0,  0,  0,-10,
     -10,  0,  5, 10, 10,  5,  0,-10,
-    -10,  5,  5, 10, 10,  5,  5,-10,
-    -10,  0, 10, 10, 10, 10,  0,-10,
+    -10,  15, 5, 10, 10,  5, 15,-10,
+    -10,  0, 15, 10, 10, 15,  0,-10,
     -10, 10, 10, 10, 10, 10, 10,-10,
-    -10,  5,  0,  0,  0,  0,  5,-10,
+    -10, 15,  0,  0,  0,  0, 15,-10,
     -20,-10,-15,-10,-10,-15,-10,-20
 };
-
     private static readonly int[] RookTable = {
     -1, 0,  5, 9,  9,   5,  0, -1,
     5,  10, 10, 15, 15, 10, 10, 5,
@@ -228,7 +220,6 @@ public class EvilBot : IChessBot
     0,  5,  5, 10, 10,  5,  5,  0,
     -10, 0,  0,  0,  0,  0,  0, -10
 };
-
     private static readonly int[] QueenTable = {
     -20,-10,-10, -5, -5,-10,-10,-20,
     -10,  0,  0,  0,  0,  0,  0,-10,
@@ -239,7 +230,6 @@ public class EvilBot : IChessBot
     -10,  0,  5,  0,  0,  0,  0,-10,
     -20,-10,-10, -5, -5,-10,-10,-20
 };
-
     private static readonly int[] KingMiddleGameTable = {
     -30,-40,-40,-50,-50,-40,-40,-30,
     -30,-40,-40,-50,-50,-40,-40,-30,
@@ -381,29 +371,6 @@ public class EvilBot : IChessBot
         }
 
         return passedPawns;
-    }
-
-    int GetPawnRank(ulong pawn, bool isWhite)
-    {
-        int rank = 0;
-        int squareIndex = BitOperations.TrailingZeroCount(pawn);
-        rank = (squareIndex / 8) + 1;
-        return isWhite ? rank : 9 - rank; // Flip rank for black
-    }
-
-    IEnumerable<ulong> GetPawnBitboards(ulong pawns)
-    {
-        // Convert bitboard to individual pawn bitboards
-        List<ulong> pawnList = new List<ulong>();
-
-        while (pawns != 0)
-        {
-            ulong lsb = pawns & (~pawns + 1);
-            pawnList.Add(lsb);
-            pawns &= pawns - 1; // Clear LSB
-        }
-
-        return pawnList;
     }
 
     private int CountBits(ulong bitboard)
