@@ -1,75 +1,52 @@
 ﻿using ChessChallenge.API;
 using System;
 using System.Collections.Generic;
-using System.Data;
 using System.Numerics;
 
-//v2.6.1 Speedups from tweaking move ordering
+//v2.6.2 Tweaks and redundant code removal
 //I still need to fix the mate in thing.
 public class MyBot : IChessBot
 {
     public int bestEvaluation { get; private set; }
-
-    private int defultSearch = 5; //recomended 5
+    private int defultSearch = 3; //recomended 5
     public int searchDepth;
     public int transpotitionsize = 2000000;
     private Move? chosenMove;
 
-    // Data structures for move ordering
-    private Dictionary<Move, int> killerMoves = new Dictionary<Move, int>();
-    private Dictionary<Move, int> history = new Dictionary<Move, int>();
+    private Dictionary<Move, int> killerMoves = new();
+    private Dictionary<Move, int> history = new();
+    private ulong[] bitboards = new ulong[12];
 
     // Bitboards
     private ulong whitePawns, whiteKnights, whiteBishops, whiteRooks, whiteQueens, whiteKings;
     private ulong blackPawns, blackKnights, blackBishops, blackRooks, blackQueens, blackKings;
 
-    private ulong[] bitboards = new ulong[12]; // 0-5: White pieces, 6-11: Black pieces
-
     public Move Think(Board board, Timer timer)
     {
         InitializeBitboards(board);
-        transpositionTable.Clear(); // Clear the table at the start of each new move
-        // Adjust search depth based on time remaining
+        transpositionTable.Clear();
+
+        // Adjust search depth based on remaining time
         if (defultSearch > 4)
         {
-            if (timer.MillisecondsRemaining <= 800)
+            searchDepth = timer.MillisecondsRemaining switch
             {
-                searchDepth = 1;
-            }
-            else if (timer.MillisecondsRemaining <= 3200)
-            {
-                searchDepth = 2;
-            }
-            else if (timer.MillisecondsRemaining <= 10500)
-            {
-                searchDepth = defultSearch - 2;
-            }
-            else if (timer.MillisecondsRemaining <= 29000)
-            {
-                searchDepth = defultSearch - 1;
-            }
-            else
-            {
-                searchDepth = defultSearch;
-            }
+                <= 800 => 1,
+                <= 3200 => 2,
+                <= 10500 => defultSearch - 2,
+                <= 29000 => defultSearch - 1,
+                _ => defultSearch
+            };
         }
         else
         {
-            if (timer.MillisecondsRemaining >= 55000)
-            {
-                searchDepth = defultSearch + 1;
-            }
-            else
-            {
-                searchDepth = defultSearch;
-            }
+            searchDepth = timer.MillisecondsRemaining >= 55000 ? defultSearch + 1 : defultSearch;
         }
         Minimax(board, searchDepth, int.MinValue, int.MaxValue, board.IsWhiteToMove, true);
 
-        // Evaluation debugging - Uncomment the next line to see evaluation
-        EvaluationDebugger debugger = new(this);
-        debugger.PrintEvaluation(board); // This will output the evaluation
-        debugger.PrintDepth(board); // Same for depth
+        // Evaluation debugging
+        new EvaluationDebugger(this).PrintEvaluation(board);
+        new EvaluationDebugger(this).PrintDepth(board);
 
         return chosenMove ?? new Move(); // Return an empty move if no move is chosen
     }
@@ -77,10 +54,8 @@ public class MyBot : IChessBot
     // Transpotition table
     private class TranspositionEntry
     {
-        public int Depth;
-        public int Score;
+        public int Depth, Score, NodeType;
         public Move BestMove;
-        public int NodeType; // 0: Exact, 1: Lower Bound, 2: Upper Bound
     }
 
     private Dictionary<ulong, TranspositionEntry> transpositionTable = new Dictionary<ulong, TranspositionEntry>();
@@ -109,14 +84,9 @@ public class MyBot : IChessBot
             score = entry.Score;
             bestMove = entry.BestMove;
 
-            if (entry.NodeType == 0) // Exact score
-                return true;
-            if (entry.NodeType == 1 && score >= beta) // Lower bound
-                return true;
-            if (entry.NodeType == 2 && score <= alpha) // Upper bound
+            if (entry.NodeType == 0 || (entry.NodeType == 1 && score >= beta) || (entry.NodeType == 2 && score <= alpha))
                 return true;
 
-            // Adjust alpha or beta
             if (entry.NodeType == 1)
                 alpha = Math.Max(alpha, score);
             else if (entry.NodeType == 2)
@@ -192,15 +162,14 @@ public class MyBot : IChessBot
     // Piece-square tables
     private static readonly int[] PawnTable = {
     0,  0,  0,  0,  0,  0,  0,  0,
-    10, 10, 10, 10, 10, 10, 10, 10,
+    10, 10,10, 15, 15, 10, 10, 10,
     5,  5, 10, 20, 20, 10,  5,  5,
     0,  0,  0, 15, 15,  0,  0,  0,
-    0,  0,  0, 10, 10,  0,  0,  0,
-    5, -5,-10,  0,  0,-10, -5,  5,
+    0,  0,  5, 10, 15, -10, 0,  0,
+    5, -5,-10,  0,  0,-10,  5,  5,
     5, 10, 10,-20,-20, 10, 10,  5,
     0,  0,  0,  0,  0,  0,  0,  0
 };
-
     private static readonly int[] KnightTable = {
     -50,-45,-30,-30,-30,-30,-45,-50,
     -40,-20,  0,  0,  0,  0,-20,-40,
@@ -209,20 +178,18 @@ public class MyBot : IChessBot
     -30,  0, 15, 20, 20, 15,  0,-30,
     -30,  5, 15, 15, 15, 15,  5,-30,
     -40,-20,  0,  5,  5,  0,-20,-40,
-    -50,-45,-30,-30,-30,-30,-45,-50
+    -50,-20,-30,-30,-30,-30,-20,-50
 };
-
     private static readonly int[] BishopTable = {
     -20,-10,-15,-10,-10,-15,-10,-20,
     -10,  0,  0,  0,  0,  0,  0,-10,
     -10,  0,  5, 10, 10,  5,  0,-10,
-    -10,  5,  5, 10, 10,  5,  5,-10,
-    -10,  0, 10, 10, 10, 10,  0,-10,
+    -10,  15, 5, 10, 10,  5, 15,-10,
+    -10,  0, 15, 10, 10, 15,  0,-10,
     -10, 10, 10, 10, 10, 10, 10,-10,
-    -10,  5,  0,  0,  0,  0,  5,-10,
+    -10, 15,  0,  0,  0,  0, 15,-10,
     -20,-10,-15,-10,-10,-15,-10,-20
 };
-
     private static readonly int[] RookTable = {
     -1, 0,  5, 9,  9,   5,  0, -1,
     5,  10, 10, 15, 15, 10, 10, 5,
@@ -233,7 +200,6 @@ public class MyBot : IChessBot
     0,  5,  5, 10, 10,  5,  5,  0,
     -10, 0,  0,  0,  0,  0,  0, -10
 };
-
     private static readonly int[] QueenTable = {
     -20,-10,-10, -5, -5,-10,-10,-20,
     -10,  0,  0,  0,  0,  0,  0,-10,
@@ -244,7 +210,6 @@ public class MyBot : IChessBot
     -10,  0,  5,  0,  0,  0,  0,-10,
     -20,-10,-10, -5, -5,-10,-10,-20
 };
-
     private static readonly int[] KingMiddleGameTable = {
     -30,-40,-40,-50,-50,-40,-40,-30,
     -30,-40,-40,-50,-50,-40,-40,-30,
@@ -498,9 +463,14 @@ public class MyBot : IChessBot
             _ => 0
         };
     }
-    private void OrderMoves(Board board, List<Move> moves)
+    private void UpdateHistoryTable(Move move, int depth)
     {
-        moves.Sort((m1, m2) => ScoreMove(board, m2) - ScoreMove(board, m1));
+        if (!history.ContainsKey(move))
+        {
+            history[move] = 0;
+        }
+        // Reward moves that cause beta cutoffs (successful pruning)
+        history[move] += depth * depth;
     }
 
     private int ScoreMove(Board board, Move move)
@@ -528,6 +498,16 @@ public class MyBot : IChessBot
 
         return score;
     }
+    private void SortMoves(Board board, List<Move> moves)
+    {
+        // Sort moves based on history table values (descending order)
+        moves.Sort((move1, move2) =>
+        {
+            history.TryGetValue(move2, out int score2);
+            history.TryGetValue(move1, out int score1);
+            return score2.CompareTo(score1); // Higher scores come first
+        });
+    }
 
     public int Minimax(Board board, int depth, int alpha, int beta, bool isMaximizing, bool isRoot)
     {
@@ -546,7 +526,7 @@ public class MyBot : IChessBot
         Move? bestMove = null;
 
         List<Move> moves = new List<Move>(board.GetLegalMoves());
-        OrderMoves(board, moves);
+        SortMoves(board, moves);
 
         // Use ttMove if available
         if (ttMove.RawValue != 0)
@@ -652,7 +632,6 @@ public class EvaluationDebugger
     public void PrintEvaluation(Board board)
     {
         //Attempt at writing mate in:
-
         if (bot.bestEvaluation >= 1000003)
             Console.WriteLine($"White mate in: {(Double)bot.bestEvaluation - 1000002}!");
         else if (bot.bestEvaluation >= 1000001)

@@ -36,15 +36,15 @@ public class MyBot : IChessBot
             {
                 searchDepth = 1;
             }
-            else if (timer.MillisecondsRemaining <= 3000)
+            else if (timer.MillisecondsRemaining <= 3200)
             {
                 searchDepth = 2;
             }
-            else if (timer.MillisecondsRemaining <= 12000)
+            else if (timer.MillisecondsRemaining <= 10500)
             {
                 searchDepth = defultSearch - 2;
             }
-            else if (timer.MillisecondsRemaining <= 35000)
+            else if (timer.MillisecondsRemaining <= 29000)
             {
                 searchDepth = defultSearch - 1;
             }
@@ -345,12 +345,27 @@ public class MyBot : IChessBot
         {
             int pawnSquare = BitOperations.TrailingZeroCount(passedPawns);
             int rank = isWhite ? pawnSquare / 8 + 1 : 8 - pawnSquare / 8;
+
+            // Bonus for the rank of the pawn
             passedPawnBonus += (rank - 1) * 10;
+
+            // Additional bonus based on distance to promotion
+            passedPawnBonus += (isWhite ? 8 - rank : rank - 1) * 5;
+
+            // Check for potential blockers (simplified)
+            // More complex blocker checks can be implemented as needed
+            ulong pawnMask = 1UL << pawnSquare;
+            if ((opponentPawns & (pawnMask >> 8)) != 0) // Pawn blocked by opponent's pawn directly ahead
+            {
+                passedPawnBonus -= 20;
+            }
+
             passedPawns &= passedPawns - 1; // Remove the lowest set bit
         }
 
         return passedPawnBonus;
     }
+
 
     ulong GetPassedPawns(ulong myPawns, ulong opponentPawns, bool isWhite)
     {
@@ -493,6 +508,7 @@ public class MyBot : IChessBot
             int attackerValue = GetPieceValue(board.GetPiece(move.StartSquare).PieceType);
             score += victimValue - attackerValue + 1000000; // High value to prioritize captures
         }
+
         // Prioritize killer moves
         if (killerMoves.ContainsKey(move))
         {
