@@ -4,14 +4,15 @@ using System.Collections.Generic;
 using System.Data;
 using System.Numerics;
 
-//v2.5.1 Time management
-//I need to fix the mate in thing.
+//v2.6.1 Clean
+//I still need to fix the mate in thing.
 public class EvilBot : IChessBot
 {
     public int bestEvaluation { get; private set; }
 
     private int defultSearch = 3; //recomended 5
     public int searchDepth;
+    public int transpotitionsize = 2000000;
     private Move? chosenMove;
 
     // Data structures for move ordering
@@ -27,7 +28,7 @@ public class EvilBot : IChessBot
     public Move Think(Board board, Timer timer)
     {
         InitializeBitboards(board);
-
+        transpositionTable.Clear(); // Clear the table at the start of each new move
         // Adjust search depth based on time remaining
         if (defultSearch > 4)
         {
@@ -35,21 +36,17 @@ public class EvilBot : IChessBot
             {
                 searchDepth = 1;
             }
-            else if (timer.MillisecondsRemaining <= 4000)
+            else if (timer.MillisecondsRemaining <= 3200)
             {
                 searchDepth = 2;
             }
-            else if (timer.MillisecondsRemaining <= 14000)
+            else if (timer.MillisecondsRemaining <= 10500)
             {
                 searchDepth = defultSearch - 2;
             }
-            else if (timer.MillisecondsRemaining <= 35000)
+            else if (timer.MillisecondsRemaining <= 29000)
             {
                 searchDepth = defultSearch - 1;
-            }
-            else if (timer.MillisecondsRemaining >= 58000)
-            {
-                searchDepth = defultSearch - 1; //first few moves done quickly
             }
             else
             {
@@ -72,6 +69,57 @@ public class EvilBot : IChessBot
         return chosenMove ?? new Move(); // Return an empty move if no move is chosen
     }
 
+    // Transpotition table
+    private class TranspositionEntry
+    {
+        public int Depth;
+        public int Score;
+        public Move BestMove;
+        public int NodeType; // 0: Exact, 1: Lower Bound, 2: Upper Bound
+    }
+
+    private Dictionary<ulong, TranspositionEntry> transpositionTable = new Dictionary<ulong, TranspositionEntry>();
+
+    private void StoreInTranspositionTable(Board board, int depth, int score, Move bestMove, int nodeType)
+    {
+        if (transpositionTable.Count >= transpotitionsize) // Limit table size
+            return;
+
+        transpositionTable[board.ZobristKey] = new TranspositionEntry
+        {
+            Depth = depth,
+            Score = score,
+            BestMove = bestMove,
+            NodeType = nodeType
+        };
+    }
+
+    private bool ProbeTranspositionTable(Board board, int depth, ref int alpha, ref int beta, out int score, out Move bestMove)
+    {
+        score = 0;
+        bestMove = default;
+
+        if (transpositionTable.TryGetValue(board.ZobristKey, out var entry) && entry.Depth >= depth)
+        {
+            score = entry.Score;
+            bestMove = entry.BestMove;
+
+            if (entry.NodeType == 0) // Exact score
+                return true;
+            if (entry.NodeType == 1 && score >= beta) // Lower bound
+                return true;
+            if (entry.NodeType == 2 && score <= alpha) // Upper bound
+                return true;
+
+            // Adjust alpha or beta
+            if (entry.NodeType == 1)
+                alpha = Math.Max(alpha, score);
+            else if (entry.NodeType == 2)
+                beta = Math.Min(beta, score);
+        }
+
+        return false;
+    }
 
     private void InitializeBitboards(Board board)
     {
@@ -199,15 +247,15 @@ public class EvilBot : IChessBot
     -30,-40,-40,-50,-50,-40,-40,-30,
     -20,-30,-30,-40,-40,-30,-30,-20,
     -10,-20,-20,-20,-20,-20,-20,-10,
-    20, 20,  0,  0,  0,  0, 20, 20,
-    20, 30,  0,  0,  0,  0, 30, 20
+    20, 20,  0,  0, -15,-10, 20, 20,
+    20, 30,  0,  0,  0,  -10, 50, 20
 };
     private static readonly int[] KingEndGameTable = {
      0,  5,  5,  5,  5,  5,  5,  0,
      0, 10, 10, 10, 10, 10, 10,  0,
      0, 10, 20, 20, 20, 20, 10,  0,
-     0, 10, 20, 19, 19, 20, 10,  0,
-     0, 10, 20, 19, 19, 20, 10,  0,
+     0, 10, 21, 19, 19, 21, 10,  0,
+     0, 10, 20, 16, 16, 20, 10,  0,
      5, 10, 20, 20, 20, 20, 10,  5,
      5, 10, 10, 10, 10, 10, 10,  5,
      0,  5,  5,  5,  5,  5,  5,  0
@@ -222,7 +270,11 @@ public class EvilBot : IChessBot
         }
         if (board.IsDraw())
         {
-            return -40; // Negative score for draw
+            return -35; // Negative score for draw
+        }
+        if (board.IsRepeatedPosition())
+        {
+            return -10;
         }
 
         int material = 0;
@@ -240,6 +292,7 @@ public class EvilBot : IChessBot
         material -= CountBits(blackRooks) * 500;
         material -= CountBits(blackQueens) * 900;
 
+
         // Positional evaluation using piece-square tables
         positional += EvaluatePieceSquareTables(whitePawns, PawnTable, true);
         positional += EvaluatePieceSquareTables(whiteKnights, KnightTable, true);
@@ -255,6 +308,7 @@ public class EvilBot : IChessBot
         // King evaluation based on game phase
         int whiteMaterial = CountMaterial(board, true);
         int blackMaterial = CountMaterial(board, false);
+
 
 
         if (whiteMaterial < 1750 || blackMaterial < 1750) // Endgame
@@ -275,13 +329,12 @@ public class EvilBot : IChessBot
         // Adjust for check status
         if (board.IsInCheck())
         {
-            material += board.IsWhiteToMove ? -20 : 20;
+            material += board.IsWhiteToMove ? -16 : 16;
         }
 
         // Return the total evaluation score
         return material + positional;
     }
-
 
     int EvaluatePassedPawns(ulong myPawns, ulong opponentPawns, bool isWhite)
     {
@@ -292,12 +345,27 @@ public class EvilBot : IChessBot
         {
             int pawnSquare = BitOperations.TrailingZeroCount(passedPawns);
             int rank = isWhite ? pawnSquare / 8 + 1 : 8 - pawnSquare / 8;
+
+            // Bonus for the rank of the pawn
             passedPawnBonus += (rank - 1) * 10;
+
+            // Additional bonus based on distance to promotion
+            passedPawnBonus += (isWhite ? 8 - rank : rank - 1) * 5;
+
+            // Check for potential blockers (simplified)
+            // More complex blocker checks can be implemented as needed
+            ulong pawnMask = 1UL << pawnSquare;
+            if ((opponentPawns & (pawnMask >> 8)) != 0) // Pawn blocked by opponent's pawn directly ahead
+            {
+                passedPawnBonus -= 20;
+            }
+
             passedPawns &= passedPawns - 1; // Remove the lowest set bit
         }
 
         return passedPawnBonus;
     }
+
 
     ulong GetPassedPawns(ulong myPawns, ulong opponentPawns, bool isWhite)
     {
@@ -337,8 +405,6 @@ public class EvilBot : IChessBot
 
         return pawnList;
     }
-
-
 
     private int CountBits(ulong bitboard)
     {
@@ -392,7 +458,6 @@ public class EvilBot : IChessBot
         return safety;
     }
 
-
     private int CountEndgamePawnStructure(ulong pawnsBitboard, bool isWhite)
     {
         int structureScore = 0;
@@ -415,7 +480,6 @@ public class EvilBot : IChessBot
         return structureScore;
     }
 
-
     private int GetPieceValue(PieceType pieceType)
     {
         return pieceType switch
@@ -429,28 +493,64 @@ public class EvilBot : IChessBot
             _ => 0
         };
     }
+    private void OrderMoves(Board board, List<Move> moves)
+    {
+        moves.Sort((m1, m2) => ScoreMove(board, m2) - ScoreMove(board, m1));
+    }
+
+    private int ScoreMove(Board board, Move move)
+    {
+        int score = 0;
+        // If it's a capture move, prioritize based on MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
+        if (move.IsCapture)
+        {
+            int victimValue = GetPieceValue(board.GetPiece(move.TargetSquare).PieceType);
+            int attackerValue = GetPieceValue(board.GetPiece(move.StartSquare).PieceType);
+            score += victimValue - attackerValue + 1000000; // High value to prioritize captures
+        }
+
+        // Prioritize killer moves
+        if (killerMoves.ContainsKey(move))
+        {
+            score += 5000; // Arbitrary bonus for killer moves
+        }
+
+        // Use history heuristic (assign a bonus based on move frequency)
+        if (history.ContainsKey(move))
+        {
+            score += history[move];
+        }
+
+        return score;
+    }
+
     public int Minimax(Board board, int depth, int alpha, int beta, bool isMaximizing, bool isRoot)
     {
+        Move ttMove = default; // Initialize ttMove with a default value
+
+        // Transposition table lookup
+        if (!isRoot && ProbeTranspositionTable(board, depth, ref alpha, ref beta, out int ttScore, out ttMove))
+        {
+            return ttScore;
+        }
+
         if (depth == 0 || board.IsInCheckmate() || board.IsDraw())
             return Evaluate(board, depth);
 
         int bestEvaluation;
         Move? bestMove = null;
+
         List<Move> moves = new List<Move>(board.GetLegalMoves());
+        OrderMoves(board, moves);
 
-        // Order moves based on previous success and captures
-        moves.Sort((m1, m2) =>
+        // Use ttMove if available
+        if (ttMove.RawValue != 0)
         {
-            int score1 = history.ContainsKey(m1) ? history[m1] : 0;
-            int score2 = history.ContainsKey(m2) ? history[m2] : 0;
+            moves.Remove(ttMove);
+            moves.Insert(0, ttMove);
+        }
 
-            if (killerMoves.ContainsKey(m1))
-                score1 += 5000;
-            if (killerMoves.ContainsKey(m2))
-                score2 += 5000;
-
-            return score2.CompareTo(score1);
-        });
+        int nodeType = 1; // Assume lower bound initially
 
         if (isMaximizing)
         {
@@ -472,7 +572,10 @@ public class EvilBot : IChessBot
 
                 alpha = Math.Max(alpha, evaluation);
                 if (beta <= alpha)
+                {
+                    nodeType = 1; // Lower bound
                     break;
+                }
             }
         }
         else
@@ -495,10 +598,22 @@ public class EvilBot : IChessBot
 
                 beta = Math.Min(beta, evaluation);
                 if (beta <= alpha)
-                    break;
+                    break; //Alpha cutoff
             }
         }
 
+        // Store position in transposition table
+        if (bestMove.HasValue)
+        {
+            if (bestEvaluation <= alpha)
+                nodeType = 2; // Upper bound
+            else if (bestEvaluation >= beta)
+                nodeType = 1; // Lower bound
+            else
+                nodeType = 0; // Exact score
+
+            StoreInTranspositionTable(board, depth, bestEvaluation, bestMove.Value, nodeType);
+        }
         if (isRoot)
         {
             this.bestEvaluation = bestEvaluation; // Store the best evaluation at the root level
