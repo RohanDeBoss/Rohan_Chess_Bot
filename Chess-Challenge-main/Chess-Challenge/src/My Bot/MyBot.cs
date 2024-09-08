@@ -21,7 +21,7 @@ public class MyBot : IChessBot
     private Move? chosenMove;
 
     // Evaluation and search optimization
-    private int[] killerMoves = new int[538]; // Assuming max 1000 plies
+    private int[] killerMoves = new int[500]; // Assuming max 1000 plies
     private int[,] history = new int[64, 64]; // From-To square history heuristic
 
     // Bitboards
@@ -36,7 +36,6 @@ public class MyBot : IChessBot
     public Move Think(Board board, Timer timer)
     {
         InitializeBitboards(board);
-        transpositionTable.Clear(); // Clear the table at the start of each new move
 
         // Adjust search depth based on time remaining
         searchDepth = CalculateSearchDepth(timer);
@@ -360,7 +359,6 @@ public class MyBot : IChessBot
 
         return passedPawnBonus;
     }
-
     ulong GetPassedPawns(ulong myPawns, ulong opponentPawns, bool isWhite)
     {
         ulong passedPawns = 0;
