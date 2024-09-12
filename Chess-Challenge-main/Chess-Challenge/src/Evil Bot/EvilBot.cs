@@ -32,37 +32,32 @@ public class EvilBot : IChessBot
         // Adjust search depth based on time remaining
         if (defultSearch > 4)
         {
-            if (timer.MillisecondsRemaining <= 800)
-            {
-                searchDepth = 1;
-            }
-            else if (timer.MillisecondsRemaining <= 3200)
-            {
-                searchDepth = 2;
-            }
-            else if (timer.MillisecondsRemaining <= 10500)
-            {
-                searchDepth = defultSearch - 2;
-            }
-            else if (timer.MillisecondsRemaining <= 29000)
-            {
-                searchDepth = defultSearch - 1;
-            }
-            else
-            {
-                searchDepth = defultSearch;
-            }
+             if (timer.MillisecondsRemaining <= 800)
+             {
+                 searchDepth = 1;
+             }
+             else if (timer.MillisecondsRemaining <= 3200)
+             {
+                 searchDepth = 2;
+             }
+             else if (timer.MillisecondsRemaining <= 10500)
+             {
+                 searchDepth = defultSearch - 2;
+             }
+             else if (timer.MillisecondsRemaining <= 29000)
+             {
+                 searchDepth = defultSearch - 1;
+             }
+             else
+             {
+                 searchDepth = defultSearch;
+             }
+            searchDepth = defultSearch;
         }
         else
         {
-            if (timer.MillisecondsRemaining >= 55000)
-            {
-                searchDepth = defultSearch + 1;
-            }
-            else
-            {
                 searchDepth = defultSearch;
-            }
+            
         }
         Minimax(board, searchDepth, int.MinValue, int.MaxValue, board.IsWhiteToMove, true);
 
@@ -527,7 +522,6 @@ public class EvilBot : IChessBot
     public int Minimax(Board board, int depth, int alpha, int beta, bool isMaximizing, bool isRoot)
     {
         Move ttMove = default; // Initialize ttMove with a default value
-
         // Transposition table lookup
         if (!isRoot && ProbeTranspositionTable(board, depth, ref alpha, ref beta, out int ttScore, out ttMove))
         {
