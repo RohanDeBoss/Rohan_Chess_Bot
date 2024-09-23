@@ -3,8 +3,8 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-//v2.6.3.1
-//I still need to fix the mate in thing
+//v2.6.3 Broken
+//I still need to fix the mate in thing.
 public class MyBot : IChessBot
 {
     public int BestEvaluation { get; private set; }
@@ -134,41 +134,35 @@ public class MyBot : IChessBot
 
     private void InitializeBitboards(Board board)
     {
-        whitePawns = whiteKnights = whiteBishops = whiteRooks = whiteQueens = whiteKings = 0;
-        blackPawns = blackKnights = blackBishops = blackRooks = blackQueens = blackKings = 0;
+        Array.Clear(bitboards, 0, bitboards.Length);
 
         for (int i = 0; i < 64; i++)
         {
             Piece piece = board.GetPiece(new Square(i));
             if (piece.PieceType == PieceType.None) continue;
 
-            ulong mask = 1UL << i;
-            if (piece.IsWhite)
-            {
-                switch (piece.PieceType)
-                {
-                    case PieceType.Pawn: whitePawns |= mask; break;
-                    case PieceType.Knight: whiteKnights |= mask; break;
-                    case PieceType.Bishop: whiteBishops |= mask; break;
-                    case PieceType.Rook: whiteRooks |= mask; break;
-                    case PieceType.Queen: whiteQueens |= mask; break;
-                    case PieceType.King: whiteKings |= mask; break;
-                }
-            }
-            else
-            {
-                switch (piece.PieceType)
-                {
-                    case PieceType.Pawn: blackPawns |= mask; break;
-                    case PieceType.Knight: blackKnights |= mask; break;
-                    case PieceType.Bishop: blackBishops |= mask; break;
-                    case PieceType.Rook: blackRooks |= mask; break;
-                    case PieceType.Queen: blackQueens |= mask; break;
-                    case PieceType.King: blackKings |= mask; break;
-                }
-            }
+            int index = GetBitboardIndex(piece);
+            bitboards[index] |= 1UL << i;
         }
+
+        whitePawns = bitboards[0]; whiteKnights = bitboards[1]; whiteBishops = bitboards[2]; whiteRooks = bitboards[3]; whiteQueens = bitboards[4]; whiteKings = bitboards[5];
+        blackPawns = bitboards[6]; blackKnights = bitboards[7]; blackBishops = bitboards[8]; blackRooks = bitboards[9]; blackQueens = bitboards[10]; blackKings = bitboards[11];
     }
+
+    private int GetBitboardIndex(Piece piece)
+    {
+        return piece.PieceType switch
+        {
+            PieceType.Pawn => 0,
+            PieceType.Knight => 1,
+            PieceType.Bishop => 2,
+            PieceType.Rook => 3,
+            PieceType.Queen => 4,
+            PieceType.King => 5,
+            _ => throw new ArgumentException("Invalid piece type")
+        } + (piece.IsWhite ? 0 : 6);
+    }
+
     private static int EvaluatePieceSquareTables(ulong bitboard, int[] table, bool isWhite)
     {
         int score = 0;
@@ -572,6 +566,7 @@ public class MyBot : IChessBot
 
         return bestEvaluation;
     }
+
 }
 public class EvaluationDebugger
 {

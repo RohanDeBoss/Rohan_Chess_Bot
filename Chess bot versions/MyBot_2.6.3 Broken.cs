@@ -8,9 +8,10 @@ using System.Numerics;
 public class MyBot : IChessBot
 {
     public int BestEvaluation { get; private set; }
+    private int positionsSearched;
 
     // Search parameters
-    private int maxDepth = 6; //recomended 5
+    private int maxDepth = 4; //recomended 5
     public int transpotitionsize = 1048576;
     private const int CHECKMATE_SCORE = 1000000;
     private const int DRAW_SCORE = -35;
@@ -37,6 +38,7 @@ public class MyBot : IChessBot
 
     public Move Think(Board board, Timer timer)
     {
+        positionsSearched = 0;  // Reset the counter at the start of each search
         InitializeBitboards(board);
         int alpha = int.MinValue;
         int beta = int.MaxValue;
@@ -58,6 +60,7 @@ public class MyBot : IChessBot
         EvaluationDebugger evaluationDebugger = new EvaluationDebugger(this);
         evaluationDebugger.PrintEvaluation(board);
         evaluationDebugger.PrintDepth(board);
+        Console.WriteLine($"Positions searched: {positionsSearched}");  // Output the total positions searched
         return bestMove;
     }
 
@@ -454,7 +457,7 @@ public class MyBot : IChessBot
     public int Minimax(Board board, int depth, int alpha, int beta, bool isMaximizing, bool isRoot)
     {
         Move ttMove = default; // Initialize ttMove with a default value
-
+        positionsSearched++;
         // Try probing the transposition table
         if (ProbeTranspositionTable(board, depth, ref alpha, ref beta, out int ttScore, out Move ttBestMove))
         {
