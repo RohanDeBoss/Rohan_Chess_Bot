@@ -30,7 +30,7 @@ public class EvilBot : IChessBot
         InitializeBitboards(board);
         transpositionTable.Clear(); // Clear the table at the start of each new move
         // Adjust search depth based on time remaining
-        if (defultSearch > 4)
+        if (defultSearch ==4)
         {
             if (timer.MillisecondsRemaining <= 800)
             {
@@ -259,7 +259,7 @@ public class EvilBot : IChessBot
      5, 10, 20, 20, 20, 20, 10,  5,
      5, 10, 10, 10, 10, 10, 10,  5,
      0,  5,  5,  5,  5,  5,  5,  0
-    };
+};
 
     public int Evaluate(Board board, int depth)
     {

@@ -259,7 +259,7 @@ public class MyBot : IChessBot
      5, 10, 20, 20, 20, 20, 10,  5,
      5, 10, 10, 10, 10, 10, 10,  5,
      0,  5,  5,  5,  5,  5,  5,  0
-    };
+};
 
     public int Evaluate(Board board, int depth)
     {
