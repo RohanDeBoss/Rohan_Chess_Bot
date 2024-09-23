@@ -10,7 +10,7 @@ public class EvilBot : IChessBot
 {
     public int bestEvaluation { get; private set; }
 
-    private int defultSearch = 3; //recomended 5
+    private int defultSearch = 2; //recomended 5
     public int searchDepth;
     public int transpotitionsize = 2000000;
     private Move? chosenMove;
@@ -56,8 +56,14 @@ public class EvilBot : IChessBot
         }
         else
         {
+            if (timer.MillisecondsRemaining >= 55000)
+            {
+                searchDepth = defultSearch + 1;
+            }
+            else
+            {
                 searchDepth = defultSearch;
-            
+            }
         }
         Minimax(board, searchDepth, int.MinValue, int.MaxValue, board.IsWhiteToMove, true);
 
