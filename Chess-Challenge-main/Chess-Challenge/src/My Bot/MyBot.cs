@@ -3,29 +3,27 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-//v2.6.3.1
-//I still need to fix the mate in thing
+//v2.6.3 Updated with new debugging
+//I still need to fix the mate in thing.
 public class MyBot : IChessBot
 {
     public int BestEvaluation { get; private set; }
     private int positionsSearched;
 
     // Search parameters
-    private int maxDepth = 4; //recomended 5
+    private int maxDepth = 3; //recomended 5
     public int transpotitionsize = 1048576;
     private const int CHECKMATE_SCORE = 1000000;
     private const int DRAW_SCORE = -35;
     private const int REPEATED_POSITION_SCORE = -5;
 
     // Search parameters
-    public int searchDepth;
     private Move? chosenMove;
     public Move? previousBestMove;
     public int currentDepth;
-    private bool allowNullMove = true; // Set to true or false based on your preference
 
     // Evaluation and search optimization
-    private int[] killerMoves = new int[400]; // Assuming max 400 plies per game
+    private int[] killerMoves = new int[500]; // Assuming max 500 plies per game
     private int[,] history = new int[64, 64]; // From-To square history heuristic
 
     // Bitboards
@@ -34,8 +32,8 @@ public class MyBot : IChessBot
 
     private ulong[] bitboards = new ulong[12]; // 0-5: White pieces, 6-11: Black pieces
 
-    // Transposition Table structure to handle collisions
-    private Dictionary<ulong, List<TranspositionEntry>> transpositionTable = new Dictionary<ulong, List<TranspositionEntry>>();
+    // Transposition Table structure
+    private Dictionary<ulong, TranspositionEntry> transpositionTable = new Dictionary<ulong, TranspositionEntry>();
 
     public Move Think(Board board, Timer timer)
     {
@@ -44,8 +42,6 @@ public class MyBot : IChessBot
         int alpha = int.MinValue;
         int beta = int.MaxValue;
         Move bestMove = new Move();
-        Move? previousBestMove = null; // Best move from the last depth iteration
-
         for (int currentDepth = 1; currentDepth <= maxDepth; currentDepth++)
         {
             // Perform the minimax search with transposition table
@@ -58,10 +54,12 @@ public class MyBot : IChessBot
                 previousBestMove = chosenMove.Value; // Store this as the previous best move for next iteration
             }
         }
+
         EvaluationDebugger evaluationDebugger = new EvaluationDebugger(this);
         evaluationDebugger.PrintEvaluation(board);
         evaluationDebugger.PrintDepth(board);
         Console.WriteLine($"Positions searched: {positionsSearched}");  // Output the total positions searched
+        Console.WriteLine(" ");
         return bestMove;
     }
 
@@ -74,34 +72,40 @@ public class MyBot : IChessBot
         public int NodeType; // 0: Exact, 1: Lower Bound, 2: Upper Bound
     }
 
-    // Improved StoreInTranspositionTable method
+    // Optimized StoreInTranspositionTable method
     private void StoreInTranspositionTable(Board board, int depth, int score, Move bestMove, int nodeType)
     {
         ulong zobristKey = board.ZobristKey;
 
-        if (!transpositionTable.TryGetValue(zobristKey, out var entries))
+        // Check if the entry already exists
+        if (transpositionTable.TryGetValue(zobristKey, out var existingEntry))
         {
-            entries = new List<TranspositionEntry>();
-            transpositionTable[zobristKey] = entries;
+            // Replace only if the new entry has a greater or equal depth
+            if (depth >= existingEntry.Depth)
+            {
+                transpositionTable[zobristKey] = new TranspositionEntry
+                {
+                    Depth = depth,
+                    Score = score,
+                    BestMove = bestMove,
+                    NodeType = nodeType
+                };
+            }
         }
-
-        // Add or update the entry
-        entries.Add(new TranspositionEntry
+        else
         {
-            Depth = depth,
-            Score = score,
-            BestMove = bestMove,
-            NodeType = nodeType
-        });
-
-        // Optionally, enforce a maximum number of entries
-        if (entries.Count > transpotitionsize)
-        {
-            entries.RemoveRange(0, entries.Count - transpotitionsize);
+            // Add a new entry if it doesn't exist
+            transpositionTable[zobristKey] = new TranspositionEntry
+            {
+                Depth = depth,
+                Score = score,
+                BestMove = bestMove,
+                NodeType = nodeType
+            };
         }
     }
 
-    // Modified ProbeTranspositionTable to handle multiple entries
+    // Optimized ProbeTranspositionTable method
     private bool ProbeTranspositionTable(Board board, int depth, ref int alpha, ref int beta, out int score, out Move bestMove)
     {
         score = 0;
@@ -109,65 +113,49 @@ public class MyBot : IChessBot
 
         ulong zobristKey = board.ZobristKey;
 
-        if (transpositionTable.TryGetValue(zobristKey, out var entries))
+        if (transpositionTable.TryGetValue(zobristKey, out var entry))
         {
-            foreach (var entry in entries)
+            if (entry.Depth >= depth)
             {
-                if (entry.Depth >= depth)
-                {
-                    score = entry.Score;
-                    bestMove = entry.BestMove;
+                score = entry.Score;
+                bestMove = entry.BestMove;
 
-                    if (entry.NodeType == 0 || (entry.NodeType == 1 && score >= beta) || (entry.NodeType == 2 && score <= alpha))
-                        return true;
+                if (entry.NodeType == 0 || (entry.NodeType == 1 && score >= beta) || (entry.NodeType == 2 && score <= alpha))
+                    return true;
 
-                    if (entry.NodeType == 1)
-                        alpha = Math.Max(alpha, score);
-                    else if (entry.NodeType == 2)
-                        beta = Math.Min(beta, score);
-                }
+                if (entry.NodeType == 1)
+                    alpha = Math.Max(alpha, score);
+                else if (entry.NodeType == 2)
+                    beta = Math.Min(beta, score);
             }
         }
-
         return false;
     }
 
     private void InitializeBitboards(Board board)
     {
-        whitePawns = whiteKnights = whiteBishops = whiteRooks = whiteQueens = whiteKings = 0;
-        blackPawns = blackKnights = blackBishops = blackRooks = blackQueens = blackKings = 0;
+        // Clear bitboards
+        Array.Clear(bitboards, 0, bitboards.Length);
 
+        // Inline the piece and bitboard indexing logic to reduce calls
         for (int i = 0; i < 64; i++)
         {
             Piece piece = board.GetPiece(new Square(i));
+
+            // Skip empty squares early
             if (piece.PieceType == PieceType.None) continue;
 
-            ulong mask = 1UL << i;
-            if (piece.IsWhite)
-            {
-                switch (piece.PieceType)
-                {
-                    case PieceType.Pawn: whitePawns |= mask; break;
-                    case PieceType.Knight: whiteKnights |= mask; break;
-                    case PieceType.Bishop: whiteBishops |= mask; break;
-                    case PieceType.Rook: whiteRooks |= mask; break;
-                    case PieceType.Queen: whiteQueens |= mask; break;
-                    case PieceType.King: whiteKings |= mask; break;
-                }
-            }
-            else
-            {
-                switch (piece.PieceType)
-                {
-                    case PieceType.Pawn: blackPawns |= mask; break;
-                    case PieceType.Knight: blackKnights |= mask; break;
-                    case PieceType.Bishop: blackBishops |= mask; break;
-                    case PieceType.Rook: blackRooks |= mask; break;
-                    case PieceType.Queen: blackQueens |= mask; break;
-                    case PieceType.King: blackKings |= mask; break;
-                }
-            }
+            // Combine bitboard index calculation into one step
+            int pieceIndex = (int)piece.PieceType - 1; // Maps Pawn to 0, Knight to 1, etc.
+            int bitboardIndex = piece.IsWhite ? pieceIndex : pieceIndex + 6;
+
+            // Set the corresponding bit for the piece
+            bitboards[bitboardIndex] |= 1UL << i;
         }
+
+        // Assign bitboards to individual piece variables
+        whitePawns = bitboards[0]; whiteKnights = bitboards[1]; whiteBishops = bitboards[2]; whiteRooks = bitboards[3]; whiteQueens = bitboards[4]; whiteKings = bitboards[5];
+        blackPawns = bitboards[6]; blackKnights = bitboards[7]; blackBishops = bitboards[8]; blackRooks = bitboards[9]; blackQueens = bitboards[10]; blackKings = bitboards[11];
     }
     private static int EvaluatePieceSquareTables(ulong bitboard, int[] table, bool isWhite)
     {
@@ -258,13 +246,12 @@ public class MyBot : IChessBot
      4,  8,  8,  8,  8,  8,  8,  4,
      0,  4,  4,  4,  4,  4,  4,  0
 };
-
     public int Evaluate(Board board, int depth)
     {
         int material = 0;
         int positional = 0;
 
-        // Checkmate and draw evaluations
+        // Check for checkmate, draw, or repeated position
         if (board.IsInCheckmate())
             positional += board.IsWhiteToMove ? -CHECKMATE_SCORE - depth : CHECKMATE_SCORE + depth;
 
@@ -274,22 +261,14 @@ public class MyBot : IChessBot
         if (board.IsRepeatedPosition())
             positional += REPEATED_POSITION_SCORE;
 
-        if (board.IsInCheck())
-        {
-            material += board.IsWhiteToMove ? -16 : 16;
-        }
-
-        // Group the piece bitboards and values into arrays
+        // Evaluate material
         ulong[] whitePieces = { whitePawns, whiteKnights, whiteBishops, whiteRooks, whiteQueens };
         ulong[] blackPieces = { blackPawns, blackKnights, blackBishops, blackRooks, blackQueens };
         int[] pieceValues = { 100, 305, 320, 500, 900 };
 
-        // Calculate material evaluation for white pieces
         for (int i = 0; i < whitePieces.Length; i++)
         {
-            int whitePieceCount = BitOperations.PopCount(whitePieces[i]);
-            int blackPieceCount = BitOperations.PopCount(blackPieces[i]);
-            material += (whitePieceCount - blackPieceCount) * pieceValues[i];
+            material += (BitOperations.PopCount(whitePieces[i]) - BitOperations.PopCount(blackPieces[i])) * pieceValues[i];
         }
 
         // Positional evaluation using piece-square tables
@@ -305,15 +284,11 @@ public class MyBot : IChessBot
         positional -= EvaluatePieceSquareTables(blackRooks, RookTable, false);
         positional -= EvaluatePieceSquareTables(blackQueens, QueenTable, false);
 
-        // Side material calculation for king bitboard change
-        int whiteMaterial = CountSideMaterial(board, true);
-        int blackMaterial = CountSideMaterial(board, false);
-
-        if (whiteMaterial < 1750 || blackMaterial < 1750) // Endgame
+        // King evaluation based on material
+        if (CountSideMaterial(board, true) < 1750 || CountSideMaterial(board, false) < 1750) // Endgame
         {
             positional += EvaluatePieceSquareTables(whiteKings, KingEndGameTable, true);
             positional -= EvaluatePieceSquareTables(blackKings, KingEndGameTable, false);
-
         }
         else // Middle game
         {
@@ -321,14 +296,12 @@ public class MyBot : IChessBot
             positional -= EvaluatePieceSquareTables(blackKings, KingMiddleGameTable, false);
         }
 
-        // Passed pawn evaluation
+        // Evaluate passed pawns
         positional += EvaluatePassedPawns(whitePawns, blackPawns, true);
         positional -= EvaluatePassedPawns(blackPawns, whitePawns, false);
 
-        // Return the total evaluation score
         return material + positional;
     }
-
     int EvaluatePassedPawns(ulong myPawns, ulong opponentPawns, bool isWhite)
     {
         int passedPawnBonus = 0;
@@ -339,23 +312,25 @@ public class MyBot : IChessBot
             int pawnSquare = BitOperations.TrailingZeroCount(passedPawns);
             int rank = isWhite ? pawnSquare / 8 + 1 : 8 - pawnSquare / 8;
 
-            // Bonus for the rank of the pawn
-            passedPawnBonus += (rank - 1) * 10;
+            // Rank-based bonus
+            passedPawnBonus += (rank - 1) * 10 + (isWhite ? 8 - rank : rank - 1) * 5;
 
-            // Additional bonus based on distance to promotion
-            passedPawnBonus += (isWhite ? 8 - rank : rank - 1) * 5;
-
-            // Check for potential blockers (simplified)
-            // More complex blocker checks can be implemented as needed
+            // Check for blockers
             ulong pawnMask = 1UL << pawnSquare;
-            if ((opponentPawns & (pawnMask >> 8)) != 0) // Pawn blocked by opponent's pawn directly ahead
+            if ((opponentPawns & (pawnMask >> 8)) != 0) // Blocked directly ahead
             {
                 passedPawnBonus -= 20;
             }
 
-            passedPawns &= passedPawns - 1; // Remove the lowest set bit
-        }
+            // Check adjacent files for potential blockers
+            if ((opponentPawns & ((pawnMask >> 7) | (pawnMask >> 9))) != 0) // Blocked on diagonals
+            {
+                passedPawnBonus -= 10;
+            }
 
+            // Clear the processed pawn
+            passedPawns &= passedPawns - 1; // Remove the least significant bit
+        }
         return passedPawnBonus;
     }
     ulong GetPassedPawns(ulong myPawns, ulong opponentPawns, bool isWhite)
@@ -373,12 +348,10 @@ public class MyBot : IChessBot
 
         return passedPawns;
     }
-
     private int CountBits(ulong bitboard)
     {
         return (int)BitOperations.PopCount(bitboard);
     }
-
     private int CountSideMaterial(Board board, bool isWhite)
     {
         int material = 0;
@@ -392,7 +365,6 @@ public class MyBot : IChessBot
 
         return material;
     }
-
     private int GetPieceValue(PieceType pieceType)
     {
         return pieceType switch
@@ -402,11 +374,10 @@ public class MyBot : IChessBot
             PieceType.Bishop => 3,
             PieceType.Rook => 5,
             PieceType.Queen => 9,
-            PieceType.King => 12,
+            PieceType.King => 999,
             _ => 0
         };
     }
-
     private void OrderMoves(Board board, ref Move[] moves, Move ttMove)
     {
         // Sort moves based on their score using Array.Sort and a custom comparison function
@@ -428,7 +399,6 @@ public class MyBot : IChessBot
             }
         }
     }
-
     private int ScoreMove(Board board, Move move)
     {
         int score = 0;
@@ -438,7 +408,7 @@ public class MyBot : IChessBot
         {
             int victimValue = GetPieceValue(board.GetPiece(move.TargetSquare).PieceType);
             int attackerValue = GetPieceValue(board.GetPiece(move.StartSquare).PieceType);
-            score += (victimValue - attackerValue) * 1000 + 1000000; // Heavily prioritize captures
+            score += (victimValue - attackerValue) * 1000 + 200000; // Pretty heavily prioritize captures
         }
 
         // Promotion: prioritize pawn promotion moves
@@ -450,21 +420,25 @@ public class MyBot : IChessBot
         // Prioritize moves that give check
         if (board.IsInCheck())
         {
-            score += 10000; // High value for moves that give check
+            score += 100000; // High value for moves that give check
         }
+
         // Killer move heuristic
-        score += killerMoves[board.PlyCount] == move.RawValue ? 5000 : 0;
+        if (board.PlyCount < killerMoves.Length) // Check bounds
+        {
+            score += killerMoves[board.PlyCount] == move.RawValue ? 5000 : 0;
+        }
 
         // History heuristic
         score += history[move.StartSquare.Index, move.TargetSquare.Index];
 
         return score;
     }
+
     public int Minimax(Board board, int depth, int alpha, int beta, bool isMaximizing, bool isRoot)
     {
         Move ttMove = default; // Initialize ttMove with a default value
         positionsSearched++;
-
         // Try probing the transposition table
         if (ProbeTranspositionTable(board, depth, ref alpha, ref beta, out int ttScore, out Move ttBestMove))
         {
@@ -572,6 +546,7 @@ public class MyBot : IChessBot
 
         return bestEvaluation;
     }
+
 }
 public class EvaluationDebugger
 {
@@ -610,7 +585,6 @@ public class EvaluationDebugger
     public void PrintDepth(Board board)
     {
         Console.WriteLine($"Searched Depth: {bot.currentDepth}");
-        Console.WriteLine(" ");
     }
     public void PrintBoardState(Board board)
     {
