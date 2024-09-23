@@ -141,18 +141,8 @@ public class MyBot : IChessBot
             bitboards[index] |= 1UL << i;
         }
 
-        whitePawns = bitboards[0];
-        whiteKnights = bitboards[1];
-        whiteBishops = bitboards[2];
-        whiteRooks = bitboards[3];
-        whiteQueens = bitboards[4];
-        whiteKings = bitboards[5];
-        blackPawns = bitboards[6];
-        blackKnights = bitboards[7];
-        blackBishops = bitboards[8];
-        blackRooks = bitboards[9];
-        blackQueens = bitboards[10];
-        blackKings = bitboards[11];
+        whitePawns = bitboards[0]; whiteKnights = bitboards[1]; whiteBishops = bitboards[2]; whiteRooks = bitboards[3]; whiteQueens = bitboards[4]; whiteKings = bitboards[5];
+        blackPawns = bitboards[6]; blackKnights = bitboards[7]; blackBishops = bitboards[8]; blackRooks = bitboards[9]; blackQueens = bitboards[10]; blackKings = bitboards[11];
     }
 
     private int GetBitboardIndex(Piece piece)
