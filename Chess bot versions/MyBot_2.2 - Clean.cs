@@ -3,8 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-//v2.6.2 Code CLeanup and bitboard update
-//I still need to fix the mate in thing.
+//v2.2 Clean
 public class MyBot : IChessBot
 {
     public int bestEvaluation { get; private set; }

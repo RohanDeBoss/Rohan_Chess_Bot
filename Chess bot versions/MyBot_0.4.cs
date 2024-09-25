@@ -1,6 +1,6 @@
 ﻿using ChessChallenge.API;
 using System;
-
+//v0.4
 public class MyBot : IChessBot
 {
     bool playerAsWhite;

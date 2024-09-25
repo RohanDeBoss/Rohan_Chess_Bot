@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-//v2.6.3 Clean
+//v2.3 Clean
 public class MyBot : IChessBot
 {
 

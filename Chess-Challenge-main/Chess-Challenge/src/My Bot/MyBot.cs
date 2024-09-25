@@ -10,7 +10,7 @@ public class MyBot : IChessBot
 
     // Search parameters
     private const int MaxDepth = 6;
-    private bool ConstantDepth = true;
+    private bool ConstantDepth = false;
     private const int CHECKMATE_SCORE = 1000000;
     private const int DRAW_SCORE = -35;
     private const int REPEATED_POSITION_SCORE = -5;

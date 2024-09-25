@@ -6,7 +6,6 @@ using System.Numerics;
 //v2.7 Clean
 public class MyBot : IChessBot
 {
-
     // Search parameters
     private const int MaxDepth = 4;
     private bool ConstantDepth = true;

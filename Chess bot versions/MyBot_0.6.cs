@@ -1,29 +1,32 @@
 ﻿using ChessChallenge.API;
 using System;
+using System.Collections.Generic;
 //v0.6
 public class MyBot : IChessBot
 {
-    bool playerAsWhite;
-    Move chosenMove;
+    private const int SEARCH_DEPTH = 3;
+    private Move? chosenMove;
+
+    // Data structures for move ordering
+    private Dictionary<Move, int> killerMoves = new Dictionary<Move, int>();
+    private Dictionary<Move, int> history = new Dictionary<Move, int>();
 
     public Move Think(Board board, Timer timer)
     {
-        playerAsWhite = board.IsWhiteToMove;
-        Minimax(board, 4, int.MinValue, int.MaxValue, playerAsWhite);
-        return chosenMove;
+        Minimax(board, SEARCH_DEPTH, int.MinValue, int.MaxValue, board.IsWhiteToMove, true);
+        return chosenMove ?? new Move(); // Return an empty move if no move is chosen
     }
 
-    int Evaluate(Board board)
+    int Evaluate(Board board, int depth)
     {
-        if (IsCheckmate(board, playerAsWhite))
+        if (board.IsInCheckmate())
         {
-            // Positive score for checkmating the opponent
-            return int.MaxValue;
+            return board.IsWhiteToMove ? -1000000 - depth : 1000000 + depth;
         }
-        if (IsCheckmate(board, !playerAsWhite))
+
+        if (board.IsDraw())
         {
-            // Negative score for being checkmated
-            return int.MinValue;
+            return 0;
         }
 
         int material = 0;
@@ -31,6 +34,8 @@ public class MyBot : IChessBot
         for (int i = 0; i < 64; i++)
         {
             Piece piece = board.GetPiece(new Square(i));
+            if (piece.PieceType == PieceType.None) continue;
+
             int colourMultiplier = piece.IsWhite ? 1 : -1;
 
             switch (piece.PieceType)
@@ -54,34 +59,66 @@ public class MyBot : IChessBot
                     material += 900 * colourMultiplier;
                     break;
             }
+
+            // Positional bonus for central control
+            if (piece.PieceType == PieceType.Pawn)
+            {
+                if (piece.Square.Rank >= 3 && piece.Square.Rank <= 4 && piece.Square.File >= 3 && piece.Square.File <= 4)
+                    material += 2 * colourMultiplier;
+            }
+            else if (piece.PieceType == PieceType.Knight)
+            {
+                if (piece.Square.Rank >= 2 && piece.Square.Rank <= 5 && piece.Square.File >= 2 && piece.Square.File <= 5)
+                    material += 2 * colourMultiplier;
+            }
         }
+
+        // Small bonus for checks
+        if (board.IsInCheck())
+        {
+            material += board.IsWhiteToMove ? -5 : 5;
+        }
+
         return material;
     }
 
-    bool IsCheckmate(Board board, bool playerToCheck)
+    int Minimax(Board board, int depth, int alpha, int beta, bool isMaximizing, bool isRoot)
     {
-        // Use the current player or the specified player
-        bool isInCheck = board.IsInCheck();
-        bool hasLegalMoves = board.GetLegalMoves().Length > 0;
+        if (depth == 0 || board.IsInCheckmate() || board.IsDraw())
+            return Evaluate(board, depth);
 
-        return isInCheck && !hasLegalMoves;
-    }
+        int bestEvaluation;
+        Move? bestMove = null;
+        List<Move> moves = new List<Move>(board.GetLegalMoves());
 
-    int Minimax(Board board, int depth, int alpha, int beta, bool isMaximizing)
-    {
-        if (depth == 0 || board.GetLegalMoves().Length == 0)
-            return Evaluate(board);
+        // Order moves based on previous success and captures
+        moves.Sort((m1, m2) => {
+            int score1 = history.ContainsKey(m1) ? history[m1] : 0;
+            int score2 = history.ContainsKey(m2) ? history[m2] : 0;
 
-        Move bestMove = board.GetLegalMoves()[0];  // Initialize with the first legal move
+            // Prioritize killer moves
+            if (killerMoves.ContainsKey(m1))
+                score1 += 5000;
+            if (killerMoves.ContainsKey(m2))
+                score2 += 5000;
+
+            // Return captures first
+            if (m1.IsCapture && !m2.IsCapture)
+                return -1;
+            if (m2.IsCapture && !m1.IsCapture)
+                return 1;
+
+            return score2.CompareTo(score1);
+        });
 
         if (isMaximizing)
         {
-            int bestEvaluation = int.MinValue;
+            bestEvaluation = int.MinValue;
 
-            foreach (Move move in board.GetLegalMoves())
+            foreach (Move move in moves)
             {
                 board.MakeMove(move);
-                int evaluation = Minimax(board, depth - 1, alpha, beta, false);
+                int evaluation = Minimax(board, depth - 1, alpha, beta, false, false);
                 board.UndoMove(move);
 
                 if (evaluation > bestEvaluation)
@@ -94,17 +131,15 @@ public class MyBot : IChessBot
                 if (beta <= alpha)
                     break;
             }
-            chosenMove = bestMove;
-            return bestEvaluation;
         }
         else
         {
-            int bestEvaluation = int.MaxValue;
+            bestEvaluation = int.MaxValue;
 
-            foreach (Move move in board.GetLegalMoves())
+            foreach (Move move in moves)
             {
                 board.MakeMove(move);
-                int evaluation = Minimax(board, depth - 1, alpha, beta, true);
+                int evaluation = Minimax(board, depth - 1, alpha, beta, true, false);
                 board.UndoMove(move);
 
                 if (evaluation < bestEvaluation)
@@ -117,8 +152,24 @@ public class MyBot : IChessBot
                 if (beta <= alpha)
                     break;
             }
-            chosenMove = bestMove;
-            return bestEvaluation;
         }
+
+        if (isRoot && bestMove.HasValue)
+            chosenMove = bestMove.Value;
+
+        // Update history and killer moves
+        if (bestMove.HasValue)
+        {
+            Move move = bestMove.Value;
+            if (history.ContainsKey(move))
+                history[move]++;
+            else
+                history[move] = 1;
+
+            if (isRoot)
+                killerMoves[move] = 1; // Assign a value to killer move
+        }
+
+        return bestEvaluation;
     }
 }

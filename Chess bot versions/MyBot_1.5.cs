@@ -1,9 +1,11 @@
 ﻿using ChessChallenge.API;
+using Raylib_cs;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Numerics;
 
-//I want to optimise my bot by adding move ordering to greatly speed up my bot: 
+//v1.5 (Made smaller and better)
 public class MyBot : IChessBot
 {
     private const int SEARCH_DEPTH = 4;
@@ -104,10 +106,10 @@ public class MyBot : IChessBot
     private static readonly int[] KnightTable = {
     -50,-40,-30,-30,-30,-30,-40,-50,
     -40,-20,  0,  0,  0,  0,-20,-40,
-    -30,  0, 10, 15, 15, 10,  0,-30,
+    -30,  0, 15, 15, 15, 15,  0,-30,
     -30,  5, 15, 20, 20, 15,  5,-30,
     -30,  0, 15, 20, 20, 15,  0,-30,
-    -30,  5, 10, 15, 15, 10,  5,-30,
+    -30,  5, 15, 15, 15, 15,  5,-30,
     -40,-20,  0,  5,  5,  0,-20,-40,
     -50,-40,-30,-30,-30,-30,-40,-50
 };
@@ -155,6 +157,19 @@ public class MyBot : IChessBot
     20, 20,  0,  0,  0,  0, 20, 20,
     20, 30, 10,  0,  0, 10, 30, 20
 };
+    // King Endgame Table
+    int[] KingEndGameTable = new int[64]
+    {
+     0,  5,  5,  5,  5,  5,  5,  0,
+     5, 10, 10, 10, 10, 10, 10,  5,
+     5, 10, 20, 20, 20, 20, 10,  5,
+     5, 10, 20, 20, 20, 20, 10,  5,
+     5, 10, 20, 20, 20, 20, 10,  5,
+     5, 10, 20, 20, 20, 20, 10,  5,
+     5, 10, 10, 10, 10, 10, 10,  5,
+     0,  5,  5,  5,  5,  5,  5,  0
+    };
+
 
     int Evaluate(Board board, int depth)
     {
@@ -171,13 +186,14 @@ public class MyBot : IChessBot
         int material = 0;
         int positional = 0;
 
+        // Material evaluation
         material += CountBits(whitePawns) * 100;
-        material += CountBits(whiteKnights) * 320;
+        material += CountBits(whiteKnights) * 315;
         material += CountBits(whiteBishops) * 330;
         material += CountBits(whiteRooks) * 500;
         material += CountBits(whiteQueens) * 900;
         material -= CountBits(blackPawns) * 100;
-        material -= CountBits(blackKnights) * 320;
+        material -= CountBits(blackKnights) * 315;
         material -= CountBits(blackBishops) * 330;
         material -= CountBits(blackRooks) * 500;
         material -= CountBits(blackQueens) * 900;
@@ -188,25 +204,67 @@ public class MyBot : IChessBot
         positional += EvaluatePieceSquareTables(whiteBishops, BishopTable, true);
         positional += EvaluatePieceSquareTables(whiteRooks, RookTable, true);
         positional += EvaluatePieceSquareTables(whiteQueens, QueenTable, true);
-        positional += EvaluatePieceSquareTables(whiteKings, KingMiddleGameTable, true);
-        positional += CountPositionalBonus(whiteKings, 1, 1); // Bonus for king on 1st rank for White
+        int whiteMaterial = CountMaterial(board, true);
+        int blackMaterial = CountMaterial(board, false);
 
-        positional -= EvaluatePieceSquareTables(blackPawns, PawnTable, false);
-        positional -= EvaluatePieceSquareTables(blackKnights, KnightTable, false);
-        positional -= EvaluatePieceSquareTables(blackBishops, BishopTable, false);
-        positional -= EvaluatePieceSquareTables(blackRooks, RookTable, false);
-        positional -= EvaluatePieceSquareTables(blackQueens, QueenTable, false);
-        positional -= EvaluatePieceSquareTables(blackKings, KingMiddleGameTable, false);
-        positional -= CountPositionalBonus(blackKings, 8, 8); // Bonus for king on 8th rank for Black
 
+        if (whiteMaterial < 1800 || blackMaterial < 1800) // Arbitrary endgame threshold
+        {
+            positional += EvaluatePieceSquareTables(whiteKings, KingEndGameTable, true);
+            positional -= EvaluatePieceSquareTables(blackKings, KingEndGameTable, false);
+        }
+
+        else
+        {
+            positional += EvaluatePieceSquareTables(whiteKings, KingMiddleGameTable, true);
+            positional += CountPositionalBonus(whiteKings, 1, 1); // Bonus for king on 1st rank for White
+            positional -= EvaluatePieceSquareTables(blackKings, KingMiddleGameTable, false);
+            positional -= CountPositionalBonus(blackKings, 8, 8); // Bonus for king on 8th rank for Black
+        }
+
+        // Passed pawn evaluation
+        positional += EvaluatePassedPawns(whitePawns, blackPawns, true);
+        positional -= EvaluatePassedPawns(blackPawns, whitePawns, false);
+
+        // Adjust for check status
         if (board.IsInCheck())
         {
-            material += board.IsWhiteToMove ? -5 : 5;
+            material += board.IsWhiteToMove ? -15 : 15;
         }
 
         return material + positional;
     }
 
+    int EvaluatePassedPawns(ulong myPawns, ulong opponentPawns, bool isWhite)
+    {
+        int passedPawnBonus = 0;
+        ulong passedPawns = GetPassedPawns(myPawns, opponentPawns, isWhite);
+
+        while (passedPawns != 0)
+        {
+            int pawnSquare = BitOperations.TrailingZeroCount(passedPawns);
+            int rank = isWhite ? pawnSquare / 8 + 1 : 8 - pawnSquare / 8;
+            passedPawnBonus += (rank - 1) * 10;
+            passedPawns &= passedPawns - 1;
+        }
+
+        return passedPawnBonus;
+    }
+
+    ulong GetPassedPawns(ulong myPawns, ulong opponentPawns, bool isWhite)
+    {
+        ulong passedPawns = 0;
+        ulong adjacentFilesMask = 0xFF; // Example for file a
+        for (int i = 0; i < 8; i++)
+        {
+            ulong filePawns = myPawns & (adjacentFilesMask << i);
+            ulong opponentFilePawns = opponentPawns & (adjacentFilesMask << i);
+            ulong noOpponentAhead = isWhite ? ~(opponentFilePawns >> 8) : ~(opponentFilePawns << 8);
+            passedPawns |= filePawns & noOpponentAhead;
+        }
+
+        return passedPawns;
+    }
 
     private int CountBits(ulong bitboard)
     {
@@ -251,11 +309,10 @@ public class MyBot : IChessBot
                                     new[] { blackPawns, blackKnights, blackBishops, blackRooks, blackQueens, blackKings };
 
         material += CountBits(pieces[0]) * 100;  // Pawns
-        material += CountBits(pieces[1]) * 320;  // Knights
-        material += CountBits(pieces[2]) * 330;  // Bishops
+        material += CountBits(pieces[1]) * 305;  // Knights
+        material += CountBits(pieces[2]) * 320;  // Bishops
         material += CountBits(pieces[3]) * 500;  // Rooks
         material += CountBits(pieces[4]) * 900;  // Queens
-        material += CountBits(pieces[5]) * 1000; // Kings (no change)
 
         return material;
     }
@@ -319,11 +376,12 @@ public class MyBot : IChessBot
         // Check if the king is on the edge squares
         if ((kingBitboard & edgeSquares) != 0)
         {
-            safety += isWhite ? -10 : 10;
+            safety += isWhite ? -20 : 20;
         }
 
         return safety;
     }
+
 
     private int CountEndgamePawnStructure(ulong pawnsBitboard, bool isWhite)
     {
@@ -336,11 +394,11 @@ public class MyBot : IChessBot
             ulong filePawns = pawnsBitboard & (isolatedPawnsMask << i);
             if (CountBits(filePawns) > 1) // Doubled pawns
             {
-                structureScore -= isWhite ? 5 : -5;
+                structureScore -= isWhite ? 15 : -15;
             }
             else if (filePawns == 0) // Isolated pawns
             {
-                structureScore -= isWhite ? 5 : -5;
+                structureScore -= isWhite ? 15 : -15;
             }
         }
 
