@@ -3,7 +3,8 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-//v2.7 Clean
+//v2.4 Added PVS and improved TT and more!
+//I still need to fix the mate in thing.
 public class MyBot : IChessBot
 {
     // Search parameters
@@ -11,7 +12,6 @@ public class MyBot : IChessBot
     private bool ConstantDepth = true;
     private const int CHECKMATE_SCORE = 1000000;
     private const int DRAW_SCORE = -35;
-    private const int REPEATED_POSITION_SCORE = -5;
 
     public int BestEvaluation { get; private set; }
     private int positionsSearched;
@@ -30,7 +30,7 @@ public class MyBot : IChessBot
     private ulong[] bitboards = new ulong[12]; // 0-5: White pieces, 6-11: Black pieces
 
     // Transposition Table with a fixed size
-    private const int TranspositionTableSize = (1 << 18) * MaxDepth; // ~1.3m entries for depth 6
+    private const int TranspositionTableSize = (1 << 18) * MaxDepth; // ~1.3m entries for depth 5
     private Dictionary<ulong, TranspositionEntry> transpositionTable = new Dictionary<ulong, TranspositionEntry>();
     private Queue<ulong> transpositionQueue = new Queue<ulong>(); // To track the keys for eviction
 
@@ -95,7 +95,7 @@ public class MyBot : IChessBot
     {
         public int Score;      // 32-bit
         public Move BestMove;  // 32-bit
-        public short Depth;    // 16-bit
+        public byte Depth;    // 16-bit
         public byte NodeType;  // 8-bit
     }
 
@@ -116,7 +116,7 @@ public class MyBot : IChessBot
             // Store the new entry
             transpositionTable[zobristKey] = new TranspositionEntry
             {
-                Depth = (short)depth,  // Store depth
+                Depth = (byte)depth,  // Store depth
                 Score = (short)score,  // Store score
                 BestMove = bestMove,   // Store best move
                 NodeType = (byte)nodeType   // Store node type
@@ -310,9 +310,6 @@ public class MyBot : IChessBot
 
         if (board.IsDraw())
             positional = DRAW_SCORE;
-
-        if (board.IsRepeatedPosition())
-            positional += REPEATED_POSITION_SCORE;
 
         return material + positional;
 

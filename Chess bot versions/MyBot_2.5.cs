@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-//v2.4 Added PVS and improved TT and more!
+//v2.5 Work in progress
 //I still need to fix the mate in thing.
 public class MyBot : IChessBot
 {
