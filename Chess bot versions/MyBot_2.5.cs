@@ -7,8 +7,10 @@ using System.Numerics;
 //I still need to fix the mate in thing.
 public class MyBot : IChessBot
 {
+    // Piece values: null, pawn, knight, bishop, rook, queen, king
+    int[] pieceValues = { 0, 100, 300, 300, 500, 900, 10000 };
     // Search parameters
-    private const int MaxDepth = 6;
+    private const int MaxDepth = 5;
     private bool ConstantDepth = false;
     private const int CHECKMATE_SCORE = 1000000;
     private const int DRAW_SCORE = -35;
@@ -427,20 +429,20 @@ public class MyBot : IChessBot
     private int ScoreMove(Board board, Move move)
     {
         int score = 0;
-
-        // MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
-        if (move.IsCapture)
-        {
-            int victimValue = GetPieceValue(board.GetPiece(move.TargetSquare).PieceType);
-            int attackerValue = GetPieceValue(board.GetPiece(move.StartSquare).PieceType);
-            score += (victimValue - attackerValue) * 1000 + 200000; // High priority for captures
-        }
+        int movePieceType = (int)move.MovePieceType;
 
         // Promotion: prioritize pawn promotion moves
         if (move.IsPromotion)
         {
             score += GetPieceValue(move.PromotionPieceType) * 10000; // Favor promotions
         }
+
+        // MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
+        if (move.IsCapture)
+            score = 1000 * pieceValues[(int)move.CapturePieceType] - pieceValues[movePieceType];
+
+        if (move.IsPromotion)
+            score += pieceValues[(int)move.PromotionPieceType] - pieceValues[movePieceType];
 
         // Prioritize moves that give check
         if (board.IsInCheck())
