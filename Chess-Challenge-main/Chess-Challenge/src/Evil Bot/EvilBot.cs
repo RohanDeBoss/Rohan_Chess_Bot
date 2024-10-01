@@ -10,7 +10,7 @@ public class EvilBot : IChessBot
     // Piece values: null, pawn, knight, bishop, rook, queen, king
     int[] pieceValues = { 0, 100, 300, 300, 500, 900, 10000 };
     // Search parameters
-    private const int MaxDepth = 3;
+    private const int MaxDepth = 4;
     private bool ConstantDepth = true;
 
     public int BestEvaluation { get; private set; }

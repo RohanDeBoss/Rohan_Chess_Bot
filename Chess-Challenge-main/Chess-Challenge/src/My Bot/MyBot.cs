@@ -11,7 +11,7 @@ public class MyBot : IChessBot
     int[] pieceValues = { 0, 100, 300, 300, 500, 900, 10000 };
 
     // Search parameters
-    private const int MaxDepth = 6;
+    private const int MaxDepth = 4;
     private bool ConstantDepth = true;
 
     public int BestEvaluation { get; private set; }
@@ -82,7 +82,7 @@ public class MyBot : IChessBot
             EvaluationDebugger evaluationDebugger = new EvaluationDebugger(this);
             evaluationDebugger.PrintEvaluation(board);
             Console.WriteLine($"Depth: {currentDepth}");
-            Console.WriteLine($"Positions searched: {positionsSearched / 1000}k");  // Total positions searched
+            Console.WriteLine($"Positions searched: {positionsSearched}");  // Total positions searched
             Console.WriteLine($"Transposition Table size: ({(transpositionTable.Count * 100) / TranspositionTableSize}%) {transpositionTable.Count} / {TranspositionTableSize}"); // Print TT size
             Console.WriteLine(" ");
 
