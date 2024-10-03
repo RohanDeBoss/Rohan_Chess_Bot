@@ -11,7 +11,7 @@ public class MyBot : IChessBot
     int[] pieceValues = { 0, 100, 300, 300, 500, 900, 10000 };
 
     // Search parameters
-    private const int MaxDepth = 4;
+    private const int MaxDepth = 3;
     private bool ConstantDepth = true;
 
     public int BestEvaluation { get; private set; }
@@ -73,7 +73,7 @@ public class MyBot : IChessBot
                         break;
                     }
                 }
-                else if (elapsedTime > Gametime / 11 || elapsedTime >= timeCap - 30)
+                else if (elapsedTime > Gametime / 12 || elapsedTime >= timeCap - 30)
                 {
                     break;
                 }
