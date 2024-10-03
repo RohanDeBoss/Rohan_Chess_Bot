@@ -3,12 +3,12 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-//v2.5 Final version, lots of small improvements, code size reductions, better move ordering, and finally... fixed evaluation debugging!
+//v2.5 Final version clean
 public class MyBot : IChessBot
 {
     // Piece values: null, pawn, knight, bishop, rook, queen, king
     int[] pieceValues = { 0, 100, 300, 300, 500, 900, 10000 };
-    
+
     // Search parameters
     private const int MaxDepth = 3;
     private bool ConstantDepth = true;
@@ -61,9 +61,6 @@ public class MyBot : IChessBot
 
             currentDepth++;
         }
-
-        Console.WriteLine($"Depth Searched: {currentDepth}");
-        PrintDebugging(board);
 
         return bestMove;
     }
@@ -545,29 +542,5 @@ public class MyBot : IChessBot
         }
 
         return bestEvaluation;
-    }
-
-    //Debugging Console info
-    public void PrintDebugging(Board board)
-    {
-        int MateValue = 100000;
-
-        if (BestEvaluation >= MateValue)
-        {
-            Console.WriteLine($"Evaluation: White forced win!");
-        }
-        else if (BestEvaluation <= -MateValue)
-        {
-            Console.WriteLine($"Evaluation: Black forced win!");
-        }
-        else
-        {
-            Console.WriteLine($"Evaluation: {BestEvaluation / 100.0}");
-        }
-        //Console.WriteLine($"Evaluation Always: {evaluation}");
-
-        Console.WriteLine($"Positions Searched: {positionsSearched}");  // Total positions searched
-        Console.WriteLine($"TT Max Size: ({transpositionTable.Count * 100 / TranspositionTableSize}%) {transpositionTable.Count} / {TranspositionTableSize}"); // Print TT size
-        Console.WriteLine(" ");
     }
 }
