@@ -10,8 +10,8 @@ public class MyBot : IChessBot
     int[] pieceValues = { 0, 100, 300, 300, 500, 900, 10000 };
 
     // Search parameters
-    private const int MaxDepth = 3;
-    private bool ConstantDepth = true;
+    private const int MaxDepth = 4;
+    private bool ConstantDepth = false;
 
     public int BestEvaluation { get; private set; }
     private int positionsSearched;
@@ -31,43 +31,55 @@ public class MyBot : IChessBot
 
     public Move Think(Board board, Timer timer)
     {
+        // Forced move optimization
+        Span<Move> legalMoves = stackalloc Move[218];
+        board.GetLegalMovesNonAlloc(ref legalMoves);
+        Move bestMove = legalMoves[0]; // Start with the first move
+        if (legalMoves.Length == 1)    // If only one legal move, return it immediately
+            return bestMove;
+
         positionsSearched = 0;  // Reset counter
         int alpha = int.MinValue, beta = int.MaxValue;
-        Move bestMove = previousBestMove ?? new Move();
-        int timeCap = (timer.MillisecondsRemaining / 62) - 100;
         long startTime = DateTime.Now.Ticks;
         int currentDepth = 1;
 
+        // Adjust the time cap dynamically
+        int timeCap = ((timer.MillisecondsRemaining / 48 + 50) + (timer.IncrementMilliseconds) / 4);
+
+        // Iterative deepening search loop
         while (true)
         {
             int eval = Minimax(board, currentDepth, alpha, beta, board.IsWhiteToMove, true);
 
+            // Update the best move if Minimax finds a valid move
             if (chosenMove.HasValue)
             {
                 bestMove = chosenMove.Value;
-                previousBestMove = chosenMove.Value; // Store this as the previous best move for the next iteration
+                previousBestMove = chosenMove.Value;  // Store the best move for future turns
             }
 
+            // Time elapsed since the start of this move
             long elapsedTime = (DateTime.Now.Ticks - startTime) / TimeSpan.TicksPerMillisecond;
 
-            if (currentDepth > 1 &&
-                ((timer.MillisecondsRemaining > 10000000 && currentDepth >= MaxDepth) ||
-                 (ConstantDepth && currentDepth >= MaxDepth) ||
-                 elapsedTime > timer.GameStartTimeMilliseconds / 12 ||
-                 elapsedTime >= timeCap - 30))
+            // Exit condition based on time limit
+            if (timer.MillisecondsElapsedThisTurn >= timeCap)
+            {
+                break;  // Stop searching if time has been exceeded
+            }
+            if (currentDepth > 1 && timer.MillisecondsRemaining > 10000000 && currentDepth >= MaxDepth || ConstantDepth == true && currentDepth >= MaxDepth)
             {
                 break;
             }
-
-            currentDepth++;
+            currentDepth++;  // Increase depth for the next search iteration
         }
 
         Console.WriteLine($"Depth Searched: {currentDepth}");
-        PrintDebugging(board);
+        PrintDebugging(board);  // Print debugging information (optional)
 
-        return bestMove;
+        return bestMove;  // Return the best move found
     }
-    private const int TranspositionTableSize = (250000) * MaxDepth; // ~2m+ entries
+
+    private const int TranspositionTableSize = (10000000); // 10m entries
     private Dictionary<ulong, TranspositionEntry> transpositionTable = new();
     private Queue<ulong> evictionQueue = new(); // Track keys for eviction
 
@@ -239,8 +251,7 @@ public class MyBot : IChessBot
 };
     public int Evaluate(Board board, int depth)
     {
-        int material = 0;
-        int positional = 0;
+        int eval = 0;
         int CHECKMATE_SCORE = 1000000;
         int DRAW_SCORE = -30;
 

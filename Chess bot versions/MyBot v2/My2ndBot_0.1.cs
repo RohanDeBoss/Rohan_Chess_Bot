@@ -44,7 +44,7 @@ public class MyBot : IChessBot
                     bestMove = move;
                 }
 
-                
+
                 // Time control: Break if running out of time
                 if (timer.MillisecondsElapsedThisTurn >= timer.MillisecondsRemaining / 30)
                 {
@@ -88,7 +88,7 @@ public class MyBot : IChessBot
             int victimValue = GetPieceValue(capturedPieceType);
             score += 10 * victimValue - attackerValue; // Higher value for capturing higher-value pieces
         }
-        
+
         // 2. Promotion moves get a high score
         if (move.IsPromotion)
         {
@@ -109,7 +109,7 @@ public class MyBot : IChessBot
         {
             score -= GetPieceValue(board.GetPiece(move.StartSquare).PieceType);
         }
-        
+
         return score;
     }
 
@@ -158,7 +158,7 @@ public class MyBot : IChessBot
 
         if (depth == 0)
             return Quiescence(board, alpha, beta, QuiescenceDepthLimit);
-        
+
         if (board.IsDraw())
             return 0; // Stalemate is evaluated as draw
 
