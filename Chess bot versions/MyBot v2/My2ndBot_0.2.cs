@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-//My2ndBot v0.2 Tweak and optimisations
+//My2ndBot v0.2 Progress
 public class MyBot : IChessBot
 {
     private const int MaxDepth = 3;
@@ -94,7 +94,7 @@ public class MyBot : IChessBot
     {
         int score = 0;
 
-        //Best move no dought
+        // Best move no doubt
         if (IsCheckmateMove(move, board))
         {
             return InfiniteScore; // or some very high value
