@@ -4,8 +4,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-//My2ndBot v0.1 Final initial version complete, already better than last bot!
-public class EvilBot : IChessBot
+//My2ndBot v0.2 Tweak and optimisations
+public class MyBot : IChessBot
 {
     private const int MaxDepth = 3;
     private const int QuiescenceDepthLimit = 5; // Adjust this value as needed
@@ -80,9 +80,9 @@ public class EvilBot : IChessBot
         }
 
         Console.WriteLine(" ");
-        Console.WriteLine($"EvilBot Depth: {depth - 1}");
-        Console.WriteLine($"EvilBot eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
-        Console.WriteLine($"EvilBot Positions searched: {positionsSearched}");
+        Console.WriteLine($"MyBot Depth: {depth - 1}");
+        Console.WriteLine($"MyBot eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
+        Console.WriteLine($"MyBot Positions searched: {positionsSearched}");
 
         return bestMove;
     }
@@ -298,7 +298,6 @@ public class EvilBot : IChessBot
         int pieceCount = BitOperations.PopCount(board.AllPiecesBitboard);
         return pieceCount <= 10; // You can adjust this threshold as needed
     }
-
 
 
     private static readonly int[,] PawnTable = {
