@@ -56,11 +56,6 @@ public class EvilBot : IChessBot
                     foundLegalMove = true;
                 }
 
-                // Time control
-                if (timer.MillisecondsElapsedThisTurn >= timer.MillisecondsRemaining / 30)
-                {
-                    break;
-                }
             }
 
 
