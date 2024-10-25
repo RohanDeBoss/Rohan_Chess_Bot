@@ -4,10 +4,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-//My2ndBot v0.1 Final initial version complete, already better than last bot!
+//My2ndBot v0.2 Working on tt's.
 public class EvilBot : IChessBot
 {
-    private const int MaxDepth = 3;
+    private const int MaxDepth = 4;
     private const int QuiescenceDepthLimit = 5; // Adjust this value as needed
 
 
@@ -35,8 +35,8 @@ public class EvilBot : IChessBot
         while (depth <= MaxDepth)
         {
             bool foundLegalMove = false;  // Track if we've found at least one legal move
-
-            foreach (Move move in legalMoves.OrderByDescending(move => MoveOrdering(move, board)))
+            var orderedMoves = legalMoves.OrderByDescending(move => MoveOrdering(move, board)).ToList();
+            foreach (Move move in orderedMoves)
             {
                 if (IsCheckmateMove(move, board))
                 {
@@ -45,13 +45,6 @@ public class EvilBot : IChessBot
                 }
 
                 board.MakeMove(move);
-
-                // Skip if move puts or leaves us in check (shouldn't happen with GetLegalMoves but extra safety)
-                if (board.IsInCheck())
-                {
-                    board.UndoMove(move);
-                    continue;
-                }
 
                 int score = -Negamax(board, depth - 1, -InfiniteScore, InfiniteScore);
                 board.UndoMove(move);
@@ -160,8 +153,8 @@ public class EvilBot : IChessBot
             return beta;
         if (alpha < stand_pat)
             alpha = stand_pat;
-
-        foreach (Move move in board.GetLegalMoves(true)) // Only captures
+        var captureMoves = board.GetLegalMoves(true).OrderByDescending(move => MoveOrdering(move, board)).ToList();
+        foreach (Move move in captureMoves)
         {
             board.MakeMove(move);
             int score = -Quiescence(board, -beta, -alpha, depth - 1);

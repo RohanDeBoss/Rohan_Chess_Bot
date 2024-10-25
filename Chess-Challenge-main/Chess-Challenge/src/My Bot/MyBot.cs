@@ -4,17 +4,29 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-//My2ndBot v0.1 Final initial version complete, already better than last bot!
+//My2ndBot v0.2 Working on tt's.
 public class MyBot : IChessBot
 {
-    private const int MaxDepth = 3;
+    private const int MaxDepth = 4;
     private const int QuiescenceDepthLimit = 5; // Adjust this value as needed
+    private const int MaxEntries = 250000 * MaxDepth; // ~2m+ entries
+    private Dictionary<ulong, TranspositionEntry> transpositionTable = new();
+    private Queue<ulong> evictionQueue = new(); // Track keys for eviction
 
+    // Structure for transposition table entry
+    public struct TranspositionEntry
+    {
+        public short Score;
+        public Move BestMove;
+        public byte Depth;
+        public byte NodeType; // 0: Exact, 1: Alpha, 2: Beta
+    }
 
     private const int InfiniteScore = 1000000;
     private int positionsSearched = 0;
 
     public int bestScore;
+
     private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 };
 
     public Move Think(Board board, Timer timer)
@@ -35,8 +47,8 @@ public class MyBot : IChessBot
         while (depth <= MaxDepth)
         {
             bool foundLegalMove = false;  // Track if we've found at least one legal move
-
-            foreach (Move move in legalMoves.OrderByDescending(move => MoveOrdering(move, board)))
+            var orderedMoves = legalMoves.OrderByDescending(move => MoveOrdering(move, board)).ToList();
+            foreach (Move move in orderedMoves)
             {
                 if (IsCheckmateMove(move, board))
                 {
@@ -45,14 +57,6 @@ public class MyBot : IChessBot
                 }
 
                 board.MakeMove(move);
-
-                // Skip if move puts or leaves us in check (shouldn't happen with GetLegalMoves but extra safety)
-                if (board.IsInCheck())
-                {
-                    board.UndoMove(move);
-                    continue;
-                }
-
                 int score = -Negamax(board, depth - 1, -InfiniteScore, InfiniteScore);
                 board.UndoMove(move);
 
@@ -69,7 +73,6 @@ public class MyBot : IChessBot
                     break;
                 }
             }
-
 
             // If we're in checkmate or stalemate, stop searching
             if (!foundLegalMove)
@@ -101,7 +104,7 @@ public class MyBot : IChessBot
     {
         int score = 0;
 
-        //Best move no dought
+        // Best move no doubt
         if (IsCheckmateMove(move, board))
         {
             return InfiniteScore; // or some very high value
@@ -161,7 +164,8 @@ public class MyBot : IChessBot
         if (alpha < stand_pat)
             alpha = stand_pat;
 
-        foreach (Move move in board.GetLegalMoves(true)) // Only captures
+        var captureMoves = board.GetLegalMoves(true).OrderByDescending(move => MoveOrdering(move, board)).ToList();
+        foreach (Move move in captureMoves)
         {
             board.MakeMove(move);
             int score = -Quiescence(board, -beta, -alpha, depth - 1);
@@ -185,9 +189,16 @@ public class MyBot : IChessBot
         if (depth == 0)
             return Quiescence(board, alpha, beta, QuiescenceDepthLimit);
 
+        ulong hashKey = board.ZobristKey; // Use Zobrist key for hashing
+
+        // Probe the transposition table
+        if (TryProbe(board, depth, ref alpha, ref beta, out int score, out Move bestMove))
+        {
+            return score;
+        }
 
         int bestScore = -InfiniteScore;
-        Move bestMove = Move.NullMove;
+        Move bestMoveLocal = Move.NullMove;
         List<Move> moves = board.GetLegalMoves().OrderByDescending(move => MoveOrdering(move, board)).ToList();
 
         foreach (Move move in moves)
@@ -199,16 +210,16 @@ public class MyBot : IChessBot
             }
 
             board.MakeMove(move);
-            int score = -Negamax(board, depth - 1, -beta, -alpha);
+            int negamaxScore = -Negamax(board, depth - 1, -beta, -alpha); // Changed to negamaxScore
             board.UndoMove(move);
 
-            if (score > bestScore)
+            if (negamaxScore > bestScore)
             {
-                bestScore = score;
-                bestMove = move;
+                bestScore = negamaxScore;
+                bestMoveLocal = move;
             }
 
-            alpha = Math.Max(alpha, score);
+            alpha = Math.Max(alpha, negamaxScore);
             if (alpha >= beta)
             {
                 // Store the killer move if beta cutoff occurs
@@ -222,8 +233,75 @@ public class MyBot : IChessBot
             }
         }
 
+        // Store the result in the transposition table
+        StoreEntry(board, depth, bestScore, bestMoveLocal, alpha == bestScore ? 0 : (bestScore >= beta ? 1 : 2));
+
         return bestScore;
     }
+
+
+    private void StoreEntry(Board board, int depth, int score, Move bestMove, int nodeType)
+    {
+        ulong key = board.ZobristKey;
+
+        // Evict the oldest entry if max size is reached
+        if (transpositionTable.Count >= MaxEntries)
+        {
+            // Remove the oldest entry
+            ulong oldestKey = evictionQueue.Dequeue();
+            transpositionTable.Remove(oldestKey);
+        }
+
+        // Update entry if the new depth is higher or equal
+        if (!transpositionTable.TryGetValue(key, out var entry) || depth > entry.Depth)
+        {
+            // Always store the best move found for this entry
+            transpositionTable[key] = new TranspositionEntry
+            {
+                Depth = (byte)depth,
+                Score = (short)score,
+                BestMove = bestMove,
+                NodeType = (byte)nodeType
+            };
+
+            // Add the key to the eviction queue for future removal
+            evictionQueue.Enqueue(key);
+        }
+    }
+
+    private bool TryProbe(Board board, int depth, ref int alpha, ref int beta, out int score, out Move bestMove)
+    {
+        ulong key = board.ZobristKey;
+
+        if (transpositionTable.TryGetValue(key, out var entry) && entry.Depth >= depth)
+        {
+            score = entry.Score;
+            bestMove = entry.BestMove;
+
+            // Check for node types and update alpha/beta accordingly
+            if (entry.NodeType == 0) // Exact
+            {
+                return true;
+            }
+            else if (entry.NodeType == 1 && score >= beta) // Alpha
+            {
+                return true;
+            }
+            else if (entry.NodeType == 2 && score <= alpha) // Beta
+            {
+                return true;
+            }
+
+            // Update alpha or beta based on the node type
+            if (entry.NodeType == 1) alpha = Math.Max(alpha, score);
+            else if (entry.NodeType == 2) beta = Math.Min(beta, score);
+        }
+
+        score = 0;
+        bestMove = Move.NullMove; // Ensure bestMove is initialized
+        return false;
+    }
+
 
     private int Evaluate(Board board, int depth)
     {
@@ -305,7 +383,6 @@ public class MyBot : IChessBot
         int pieceCount = BitOperations.PopCount(board.AllPiecesBitboard);
         return pieceCount <= 10; // You can adjust this threshold as needed
     }
-
 
 
     private static readonly int[,] PawnTable = {
