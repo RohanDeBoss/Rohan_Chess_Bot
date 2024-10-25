@@ -4,11 +4,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-//My2ndBot v0.1
+//My2ndBot v0.1 Final initial version complete, already better than last bot!
 public class MyBot : IChessBot
 {
-    private const int MaxDepth = 4;
-    private const int QuiescenceDepthLimit = 3; // Adjust this value as needed
+    private const int MaxDepth = 3;
+    private const int QuiescenceDepthLimit = 5; // Adjust this value as needed
 
 
     private const int InfiniteScore = 1000000;
@@ -20,52 +20,79 @@ public class MyBot : IChessBot
     public Move Think(Board board, Timer timer)
     {
         Move bestMove = Move.NullMove;
-        int bestScore = -InfiniteScore;
         int depth = 1;
-        int currentEval = 0;
+        bestScore = -InfiniteScore;
+        positionsSearched = 0;
+
+        // Get legal moves count - if only one move, return it immediately
+        var legalMoves = board.GetLegalMoves();
+        if (legalMoves.Length == 1)
+        {
+            return legalMoves[0];
+        }
 
         // Iterative deepening loop
         while (depth <= MaxDepth)
         {
-            bestMove = Move.NullMove;
-            bestScore = -InfiniteScore;
+            bool foundLegalMove = false;  // Track if we've found at least one legal move
 
-            List<Move> moves = board.GetLegalMoves().OrderByDescending(move => MoveOrdering(move, board)).ToList();
-
-            foreach (Move move in moves)
+            foreach (Move move in legalMoves.OrderByDescending(move => MoveOrdering(move, board)))
             {
+                if (IsCheckmateMove(move, board))
+                {
+                    // Play the checkmate move immediately
+                    return move;
+                }
+
                 board.MakeMove(move);
+
+                // Skip if move puts or leaves us in check (shouldn't happen with GetLegalMoves but extra safety)
+                if (board.IsInCheck())
+                {
+                    board.UndoMove(move);
+                    continue;
+                }
+
                 int score = -Negamax(board, depth - 1, -InfiniteScore, InfiniteScore);
                 board.UndoMove(move);
 
-                if (score > bestScore)
+                if (score > bestScore || !foundLegalMove)
                 {
                     bestScore = score;
                     bestMove = move;
+                    foundLegalMove = true;
                 }
 
-
-                // Time control: Break if running out of time
+                // Time control
                 if (timer.MillisecondsElapsedThisTurn >= timer.MillisecondsRemaining / 30)
                 {
                     break;
                 }
             }
 
-            // Increase depth for next iteration
+
+            // If we're in checkmate or stalemate, stop searching
+            if (!foundLegalMove)
+            {
+                break;
+            }
+
             depth++;
         }
 
-        // Store the best score and move for the current depth
-        currentEval = (board.IsWhiteToMove ? 1 : -1) * bestScore;
-        Console.WriteLine($"Depth: {depth}");
-        Console.WriteLine($"MyBot's eval: {currentEval}");
-        Console.WriteLine($"Positions searched: {positionsSearched}");
+        // Final safety check - if the best move is null, pick any legal move
+        if (bestMove == Move.NullMove && legalMoves.Length > 0)
+        {
+            bestMove = legalMoves[0];
+        }
 
-        positionsSearched = 0;  // Reset counter for the next search
+        Console.WriteLine(" ");
+        Console.WriteLine($"MyBot Depth: {depth - 1}");
+        Console.WriteLine($"MyBot eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
+        Console.WriteLine($"MyBot Positions searched: {positionsSearched}");
+
         return bestMove;
     }
-
 
     private int[,] historyHeuristic = new int[64, 64]; // For history moves
     private Move[] killerMoves = new Move[2]; // For killer moves
@@ -121,7 +148,6 @@ public class MyBot : IChessBot
         return isCheckmate;
     }
 
-
     private int Quiescence(Board board, int alpha, int beta, int depth)
     {
         positionsSearched++;
@@ -153,14 +179,11 @@ public class MyBot : IChessBot
     {
         positionsSearched++;  // Increment the positions counter
 
-        if (board.IsInCheckmate())
+        if (board.IsInCheckmate() || board.IsDraw())
             return Evaluate(board, depth);
 
         if (depth == 0)
             return Quiescence(board, alpha, beta, QuiescenceDepthLimit);
-
-        if (board.IsDraw())
-            return 0; // Stalemate is evaluated as draw
 
 
         int bestScore = -InfiniteScore;
@@ -169,6 +192,12 @@ public class MyBot : IChessBot
 
         foreach (Move move in moves)
         {
+            if (IsCheckmateMove(move, board))
+            {
+                // Return immediately if checkmate is found
+                return InfiniteScore;
+            }
+
             board.MakeMove(move);
             int score = -Negamax(board, depth - 1, -beta, -alpha);
             board.UndoMove(move);
