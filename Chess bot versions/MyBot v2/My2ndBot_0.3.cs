@@ -362,7 +362,7 @@ public class MyBot : IChessBot
 
         int score = 0;
         bool isEndgame = IsEndgame(board);
-        
+
         foreach (PieceList pieceList in board.GetAllPieceLists())
         {
             int pieceValue = GetPieceValue(pieceList.TypeOfPieceInList);

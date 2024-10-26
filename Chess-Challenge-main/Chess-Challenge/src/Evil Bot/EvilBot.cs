@@ -7,8 +7,8 @@ using System.Numerics;
 //My2ndBot v0.2 TT Added so a lot faster + bot is now stronger!
 public class EvilBot : IChessBot
 {
-    private const int MaxDepth = 1;
-    private const int QuiescenceDepthLimit = 5;
+    private const int MaxDepth = 4;
+    private const int QuiescenceDepthLimit = 8;
     private const int InfiniteScore = 1000000;
     private const int MaxTTSize = 1000000;
 
@@ -240,6 +240,9 @@ public class EvilBot : IChessBot
         return alpha;
     }
 
+    private const int R = 2; // Reduction for null move pruning
+    private const int LMR_THRESHOLD = 2;  // Depth threshold to apply LMR
+
     private int Negamax(Board board, int depth, int alpha, int beta, int ply)
     {
         positionsSearched++;
@@ -247,7 +250,7 @@ public class EvilBot : IChessBot
         if (board.IsInCheckmate() || board.IsDraw())
             return Evaluate(board, depth);
 
-        // Check transposition table
+        // Transposition Table lookup
         ulong positionKey = board.ZobristKey;
         if (transpositionTable.TryGetValue(positionKey, out TTEntry ttEntry))
         {
@@ -266,15 +269,34 @@ public class EvilBot : IChessBot
         if (depth == 0)
             return Quiescence(board, alpha, beta, QuiescenceDepthLimit);
 
+        // Null Move Pruning
+        if (depth > R && !board.IsInCheck())
+        {
+            board.ForceSkipTurn();
+            int nullMoveScore = -Negamax(board, depth - R - 1, -beta, -beta + 1, ply + 1);
+            board.UndoSkipTurn();
+
+            if (nullMoveScore >= beta)
+                return beta;
+        }
+
         int originalAlpha = alpha;
         Move bestMove = Move.NullMove;
         int bestScore = -InfiniteScore;
         List<Move> moves = board.GetLegalMoves().OrderByDescending(move => MoveOrdering(move, board)).ToList();
 
+        int moveCount = 0;
         foreach (Move move in moves)
         {
             board.MakeMove(move);
-            int score = -Negamax(board, depth - 1, -beta, -alpha, ply + 1);
+
+            // Late Move Reduction check
+            int newDepth = depth - 1;
+            bool canReduce = moveCount >= LMR_THRESHOLD && depth > 2 && !move.IsCapture && !board.IsInCheck();
+            if (canReduce)
+                newDepth--; // Reduce depth for late moves
+
+            int score = -Negamax(board, newDepth, -beta, -alpha, ply + 1);
             board.UndoMove(move);
 
             if (score > bestScore)
@@ -286,14 +308,15 @@ public class EvilBot : IChessBot
             alpha = Math.Max(alpha, score);
             if (alpha >= beta)
             {
-                // Update killer moves on beta cutoff
-                UpdateKillerMoves(move, ply);
-                // Update history moves on beta cutoff
-                UpdateHistoryMove(move, depth);
-
-                AddToTranspositionTable(positionKey, depth, beta, BETA, move);
+                if (move.CapturePieceType == PieceType.None)
+                {
+                    UpdateKillerMoves(move, ply);
+                    UpdateHistoryMove(move, depth);
+                    AddToTranspositionTable(positionKey, depth, beta, BETA, move);
+                }
                 return beta;
             }
+            moveCount++;
         }
 
         byte flag = bestScore <= originalAlpha ? ALPHA :
