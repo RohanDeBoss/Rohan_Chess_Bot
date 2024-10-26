@@ -2,13 +2,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Net.NetworkInformation;
 using System.Numerics;
 
 //My2ndBot v0.2 TT Added so a lot faster + bot is now stronger!
 public class MyBot : IChessBot
 {
-    private const int MaxDepth = 3;
+    private const int MaxDepth = 2;
     private const int QuiescenceDepthLimit = 5;
     private const int InfiniteScore = 1000000;
     private const int MaxTTSize = 1000000;
