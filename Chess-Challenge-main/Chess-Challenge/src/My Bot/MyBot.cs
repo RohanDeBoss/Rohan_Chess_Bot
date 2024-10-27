@@ -8,9 +8,8 @@ using System.Numerics;
 public class MyBot : IChessBot
 {
     private const int MaxDepth = 4;
-    private const int QuiescenceDepthLimit = 8;
     private const int InfiniteScore = 1000000;
-    private const int MaxTTSize = 1000000;
+    private const int MaxTTSize = 1000000 * MaxDepth;
 
     private int positionsSearched = 0;
     private int ttHits = 0;
@@ -129,7 +128,7 @@ public class MyBot : IChessBot
         Console.WriteLine($"MyBot Depth: {depth - 1}");
         Console.WriteLine($"MyBot eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
         Console.WriteLine($"MyBot Positions searched: {positionsSearched:N0}");
-        PrintTTStats();
+        //PrintTTStats();
 
         return bestMove;
     }
@@ -144,7 +143,7 @@ public class MyBot : IChessBot
 
         // 1. TT moves (highest priority)
         ulong positionKey = board.ZobristKey;
-        if (transpositionTable.TryGetValue(positionKey, out TTEntry ttEntry) &&
+        if (transpositionTable.TryGetValue(positionKey, out TTEntry? ttEntry) &&
             ttEntry.BestMove == move)
         {
             return 1000000;
@@ -233,21 +232,8 @@ public class MyBot : IChessBot
         // Get capture moves ordered by their potential value
         var captureMoves = board.GetLegalMoves(true).OrderByDescending(move => MoveOrdering(move, board)).ToList();
 
-        // Identify moves that put the opponent in check
-        var checkMoves = new List<Move>();
-        foreach (var move in board.GetLegalMoves(false))
-        {
-            board.MakeMove(move);
-            if (board.IsInCheck())  // Check if the move puts the opponent in check
-                checkMoves.Add(move);
-            board.UndoMove(move);
-        }
-
-        // Combine capture moves and check moves
-        var allMoves = captureMoves.Concat(checkMoves).ToList();
-
-        // Explore all relevant moves
-        foreach (Move move in allMoves)
+        // Explore capturing moves
+        foreach (Move move in captureMoves)
         {
             board.MakeMove(move);
             int score = -Quiescence(board, -beta, -alpha, depth - 1); // Recur with reduced depth
@@ -265,7 +251,6 @@ public class MyBot : IChessBot
     }
 
 
-
     private const int R = 2; // Reduction for null move pruning
     private const int LMR_THRESHOLD = 2;  // Depth threshold to apply LMR
 
@@ -278,7 +263,7 @@ public class MyBot : IChessBot
 
         // Transposition Table lookup
         ulong positionKey = board.ZobristKey;
-        if (transpositionTable.TryGetValue(positionKey, out TTEntry ttEntry))
+        if (transpositionTable.TryGetValue(positionKey, out TTEntry? ttEntry))
         {
             if (ttEntry.Depth >= depth)
             {
@@ -293,7 +278,7 @@ public class MyBot : IChessBot
         }
 
         if (depth == 0)
-            return Quiescence(board, alpha, beta, QuiescenceDepthLimit);
+            return Quiescence(board, alpha, beta, 0);
 
         // Null Move Pruning
         if (depth > R && !board.IsInCheck())
@@ -378,7 +363,6 @@ public class MyBot : IChessBot
 
         return board.IsWhiteToMove ? score : -score;
     }
-
 
     private int GetPieceValue(PieceType pieceType)
     {
