@@ -11,11 +11,11 @@ public class MyBot : IChessBot
     private const int MaxDepth = 5;
     private const int InfiniteScore = 1000000;
     private const int TT_SIZE = 5000000 * MaxDepth;
-    private const byte EXACT = 0;
-    private const byte ALPHA = 1;
-    private const byte BETA = 2;
+
     private const int R = 2;
     private const int LMR_THRESHOLD = 2;
+    private Move[] killerMoves = new Move[MaxDepth * 2];
+    private int[,] historyMoves = new int[64, 64];
 
     private int positionsSearched = 0;
     private int ttHits = 0;
@@ -23,9 +23,6 @@ public class MyBot : IChessBot
     public int bestScore;
     private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 };
     private static TTEntry[] tt = new TTEntry[TT_SIZE];
-    private Move[] killerMoves = new Move[MaxDepth * 2];
-    private int[,] historyMoves = new int[64, 64];
-
 
     public Move Think(Board board, Timer timer)
     {
@@ -306,6 +303,10 @@ public class MyBot : IChessBot
         public byte Flag;
         public Move BestMove;
     }
+
+    private const byte EXACT = 0;
+    private const byte ALPHA = 1;
+    private const byte BETA = 2;
 
     private void AddTT(ulong key, int depth, int score, byte flag, Move bestMove)
     {
