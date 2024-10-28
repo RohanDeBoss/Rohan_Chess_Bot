@@ -10,7 +10,7 @@ public class MyBot : IChessBot
     private const bool ConstantDepth = true;
     private const int MaxDepth = 5;
     private const int InfiniteScore = 1000000;
-    private const int TT_SIZE = 5000000 * MaxDepth;
+    private const int TT_SIZE = 500000 * MaxDepth;
 
     private const int R = 2;
     private const int LMR_THRESHOLD = 2;
