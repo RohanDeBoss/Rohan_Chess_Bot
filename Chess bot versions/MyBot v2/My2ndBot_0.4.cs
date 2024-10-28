@@ -10,7 +10,7 @@ public class MyBot : IChessBot
     private const bool ConstantDepth = true;
     private const int MaxDepth = 5;
     private const int InfiniteScore = 1000000;
-    private const int TT_SIZE = 5000000 * MaxDepth;
+    private const int TT_SIZE = 500000 * MaxDepth;
     private const byte EXACT = 0;
     private const byte ALPHA = 1;
     private const byte BETA = 2;
@@ -259,18 +259,18 @@ public class MyBot : IChessBot
     private int cachedPieceCount = -1;
     private ulong lastBoardHash;
     private bool IsEndgame(Board board)
-{
-    ulong currentBoardHash = board.ZobristKey; // Unique identifier for board state
-
-    // Update cached piece count only if the board has changed
-    if (currentBoardHash != lastBoardHash)
     {
-        cachedPieceCount = BitOperations.PopCount(board.AllPiecesBitboard);
-        lastBoardHash = currentBoardHash;
-    }
+        ulong currentBoardHash = board.ZobristKey; // Unique identifier for board state
 
-    return cachedPieceCount <= 10; // Threshold can be adjusted as needed
-}
+        // Update cached piece count only if the board has changed
+        if (currentBoardHash != lastBoardHash)
+        {
+            cachedPieceCount = BitOperations.PopCount(board.AllPiecesBitboard);
+            lastBoardHash = currentBoardHash;
+        }
+
+        return cachedPieceCount <= 10; // Threshold can be adjusted as needed
+    }
 
     private int GetPieceValue(PieceType pieceType)
     {
