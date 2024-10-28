@@ -8,7 +8,7 @@ using System.Numerics;
 public class MyBot : IChessBot
 {
     private const bool ConstantDepth = true;
-    private const int MaxDepth = 5;
+    private const int MaxDepth = 2;
     private const int InfiniteScore = 1000000;
     private const int TT_SIZE = 500000 * MaxDepth;
 
@@ -71,7 +71,7 @@ public class MyBot : IChessBot
         Console.WriteLine($"MyBot Depth: {depth - 1}");
         Console.WriteLine($"MyBot eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
         Console.WriteLine($"MyBot Positions searched: {positionsSearched:N0}");
-        PrintTTStats();
+        //PrintTTStats();
         return bestMove;
     }
 
@@ -202,7 +202,22 @@ public class MyBot : IChessBot
             if (moveCount >= LMR_THRESHOLD && depth > 2 && !move.IsCapture && !board.IsInCheck())
                 newDepth--;
 
-            int score = -Negamax(board, newDepth, -beta, -alpha, ply + 1);
+            int score;
+            if (moveCount == 0) // First move, full search window
+            {
+                score = -Negamax(board, newDepth, -beta, -alpha, ply + 1);
+            }
+            else
+            {
+                // PVS: Perform a null window search on non-primary moves
+                score = -Negamax(board, newDepth, -alpha - 1, -alpha, ply + 1);
+                // If it fails within the alpha-beta window, re-search with the full window
+                if (score > alpha && score < beta)
+                {
+                    score = -Negamax(board, newDepth, -beta, -alpha, ply + 1);
+                }
+            }
+
             board.UndoMove(move);
 
             if (score > bestScore)
@@ -235,7 +250,7 @@ public class MyBot : IChessBot
         if (board.IsInCheckmate())
             return -InfiniteScore - depth;
         if (board.IsDraw())
-            return 0;
+            return -40;
 
         int score = 0;
         bool isEndgame = IsEndgame(board);

@@ -235,7 +235,7 @@ public class MyBot : IChessBot
         if (board.IsInCheckmate())
             return -InfiniteScore - depth;
         if (board.IsDraw())
-            return 0;
+            return -40;
 
         int score = 0;
         bool isEndgame = IsEndgame(board);
