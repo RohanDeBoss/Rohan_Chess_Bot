@@ -8,14 +8,13 @@ using System.Numerics;
 public class MyBot : IChessBot
 {
     private const bool ConstantDepth = true;
-    private const int MaxDepth = 5;
-    private const int InfiniteScore = 1000000;
-    private const int TT_SIZE = 500000 * MaxDepth;
+    private const short MaxDepth = 2;
+    private const short InfiniteScore = 30000; //less than 32k so that it fits into short!
+    private const int TT_SIZE = 1048576;
+    private const short TimeSpentFractionofTotal = 20;
 
-    private const int R = 2;
-    private const int LMR_THRESHOLD = 2;
-    private Move[] killerMoves = new Move[MaxDepth * 2];
-    private int[,] historyMoves = new int[64, 64];
+    private const byte R = 2;
+    private const byte LMR_THRESHOLD = 2;
 
     private int positionsSearched = 0;
     private int ttHits = 0;
@@ -30,16 +29,17 @@ public class MyBot : IChessBot
         positionsSearched = 0;
         ttHits = 0;
         ttCollisions = 0;
-        int depth = 1;
+        short safetymaxdepth = 150;
+        short depth = 1;
 
         var legalMoves = board.GetLegalMoves();
         if (legalMoves.Length == 1) return legalMoves[0]; // Return immediately if only one move is possible
 
         // Iterative Deepening with time management when ConstantDepth is false
         int maxTimeForTurn = ConstantDepth ? int.MaxValue :
-            (Math.Min(1000, timer.MillisecondsRemaining / 28) + timer.IncrementMilliseconds) / 4;
+            (Math.Min(1000, timer.MillisecondsRemaining / TimeSpentFractionofTotal) + timer.IncrementMilliseconds) / 4;
 
-        while (depth <= MaxDepth && (ConstantDepth || timer.MillisecondsElapsedThisTurn < maxTimeForTurn))
+        while ((ConstantDepth && depth <= MaxDepth) || (!ConstantDepth && timer.MillisecondsElapsedThisTurn < maxTimeForTurn))
         {
             bool foundLegalMove = false;
             var orderedMoves = legalMoves.OrderByDescending(move => MoveOrdering(move, board)).ToList();
@@ -60,7 +60,7 @@ public class MyBot : IChessBot
                 }
             }
 
-            if (!foundLegalMove) break; // Exit if no moves were valid at this depth
+            if (!foundLegalMove || depth >= safetymaxdepth) break; // Exit if no moves were valid at this depth
             depth++; // Increase depth for the next iteration
         }
 
@@ -71,7 +71,7 @@ public class MyBot : IChessBot
         Console.WriteLine($"MyBot Depth: {depth - 1}");
         Console.WriteLine($"MyBot eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
         Console.WriteLine($"MyBot Positions searched: {positionsSearched:N0}");
-        PrintTTStats();
+        //PrintTTStats();
         return bestMove;
     }
 
@@ -115,6 +115,9 @@ public class MyBot : IChessBot
 
         return score;
     }
+
+    private Move[] killerMoves = new Move[100 * 2];
+    private int[,] historyMoves = new int[64, 64];
 
     private void UpdateKillerMoves(Move move, int ply)
     {
@@ -166,8 +169,10 @@ public class MyBot : IChessBot
     private int Negamax(Board board, int depth, int alpha, int beta, int ply)
     {
         positionsSearched++;
-        if (board.IsInCheckmate() || board.IsDraw())
-            return Evaluate(board, depth);
+        if (board.IsInCheckmate())
+            return -InfiniteScore - depth;
+        if (board.IsDraw())
+            return board.IsWhiteToMove ? -40 : 40;
 
         ulong key = board.ZobristKey;
         int index = (int)(key % TT_SIZE);
@@ -191,23 +196,38 @@ public class MyBot : IChessBot
 
         int originalAlpha = alpha;
         Move bestMove = Move.NullMove;
-        int bestScore = -InfiniteScore;
+        short bestScore = -InfiniteScore;
         List<Move> moves = board.GetLegalMoves().OrderByDescending(move => MoveOrdering(move, board)).ToList();
 
         int moveCount = 0;
         foreach (Move move in moves)
         {
             board.MakeMove(move);
-            int newDepth = depth - 1;
+            short newDepth = (short)(depth - 1);
             if (moveCount >= LMR_THRESHOLD && depth > 2 && !move.IsCapture && !board.IsInCheck())
                 newDepth--;
 
-            int score = -Negamax(board, newDepth, -beta, -alpha, ply + 1);
+            int score;
+            if (moveCount == 0) // First move, full search window
+            {
+                score = -Negamax(board, newDepth, -beta, -alpha, ply + 1);
+            }
+            else
+            {
+                // PVS: Perform a null window search on non-primary moves
+                score = -Negamax(board, newDepth, -alpha - 1, -alpha, ply + 1);
+                // If it fails within the alpha-beta window, re-search with the full window
+                if (score > alpha && score < beta)
+                {
+                    score = -Negamax(board, newDepth, -beta, -alpha, ply + 1);
+                }
+            }
+
             board.UndoMove(move);
 
             if (score > bestScore)
             {
-                bestScore = score;
+                bestScore = (short)score;
                 bestMove = move;
             }
 
@@ -218,7 +238,7 @@ public class MyBot : IChessBot
                 {
                     UpdateKillerMoves(move, ply);
                     UpdateHistoryMove(move, depth);
-                    AddTT(key, depth, beta, BETA, move);
+                    AddTT(key, depth, (short)beta, BETA, move);
                 }
                 return beta;
             }
@@ -226,17 +246,12 @@ public class MyBot : IChessBot
         }
 
         byte flag = bestScore <= originalAlpha ? ALPHA : bestScore >= beta ? BETA : EXACT;
-        AddTT(key, depth, bestScore, flag, bestMove);
+        AddTT(key, depth, (short)bestScore, flag, bestMove);
         return bestScore;
     }
 
     private int Evaluate(Board board, int depth)
     {
-        if (board.IsInCheckmate())
-            return -InfiniteScore - depth;
-        if (board.IsDraw())
-            return -40;
-
         int score = 0;
         bool isEndgame = IsEndgame(board);
 
@@ -299,7 +314,7 @@ public class MyBot : IChessBot
     {
         public ulong Key;
         public short Depth;
-        public int Score;
+        public short Score;
         public byte Flag;
         public Move BestMove;
     }
@@ -308,7 +323,7 @@ public class MyBot : IChessBot
     private const byte ALPHA = 1;
     private const byte BETA = 2;
 
-    private void AddTT(ulong key, int depth, int score, byte flag, Move bestMove)
+    private void AddTT(ulong key, int depth, short score, byte flag, Move bestMove)
     {
         int index = (int)(key % TT_SIZE);
         if (tt[index].Key != key && tt[index].Key != 0) ttCollisions++;
