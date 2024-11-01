@@ -8,7 +8,7 @@ using System.Numerics;
 public class EvilBot : IChessBot
 {
     private const bool ConstantDepth = true;
-    private const short MaxDepth = 2;
+    private const short MaxDepth = 7;
     private const short InfiniteScore = 30000; //less than 32k so that it fits into short!
     private const int TT_SIZE = 1048576;
     private const short TimeSpentFractionofTotal = 20;
@@ -60,7 +60,7 @@ public class EvilBot : IChessBot
                 }
             }
 
-            if (!foundLegalMove || depth >= safetymaxdepth) break; // Exit if no moves were valid at this depth
+            if (!foundLegalMove || depth >= safetymaxdepth) break; // Exit if no moves were found or depth>=150
             depth++; // Increase depth for the next iteration
         }
 
@@ -71,7 +71,7 @@ public class EvilBot : IChessBot
         Console.WriteLine($"Evil Depth: {depth - 1}");
         Console.WriteLine($"Evil eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
         Console.WriteLine($"Evil Positions searched: {positionsSearched:N0}");
-        //PrintTTStats();
+        PrintTTStats();
         return bestMove;
     }
 
@@ -281,7 +281,7 @@ public class EvilBot : IChessBot
             lastBoardHash = currentBoardHash;
         }
 
-        return cachedPieceCount <= 10; // Threshold can be adjusted as needed
+        return cachedPieceCount <= 12; // Threshold can be adjusted as needed
     }
 
     private int GetPieceValue(PieceType pieceType)
