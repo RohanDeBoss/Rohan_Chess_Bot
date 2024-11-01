@@ -8,7 +8,7 @@ using System.Numerics;
 public class EvilBot : IChessBot
 {
     private const bool ConstantDepth = true;
-    private const short MaxDepth = 7;
+    private const short MaxDepth = 4;
     private const short InfiniteScore = 30000; //less than 32k so that it fits into short!
     private const int TT_SIZE = 1048576;
     private const short TimeSpentFractionofTotal = 20;
@@ -20,6 +20,7 @@ public class EvilBot : IChessBot
     private int ttHits = 0;
     private int ttCollisions = 0;
     public int bestScore;
+
     private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 };
     private static TTEntry[] tt = new TTEntry[TT_SIZE];
 
@@ -63,31 +64,21 @@ public class EvilBot : IChessBot
             if (!foundLegalMove || depth >= safetymaxdepth) break; // Exit if no moves were found or depth>=150
             depth++; // Increase depth for the next iteration
         }
-
         if (bestMove == Move.NullMove && legalMoves.Length > 0)
             bestMove = legalMoves[0];
+
+        //TT loop
+        int usedEntries = tt.Count(entry => entry.Key != 0);
+        double fillPercentage = (usedEntries * 100.0) / TT_SIZE;
 
         Console.WriteLine(" ");
         Console.WriteLine($"Evil Depth: {depth - 1}");
         Console.WriteLine($"Evil eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
         Console.WriteLine($"Evil Positions searched: {positionsSearched:N0}");
-        PrintTTStats();
+        Console.WriteLine($"Evil TT Size: {usedEntries:N0} / {TT_SIZE:N0} ({fillPercentage:F2}% full)");
+
         return bestMove;
     }
-
-    private void PrintTTStats()
-    {
-        int usedEntries = tt.Count(entry => entry.Key != 0);
-        double fillPercentage = (usedEntries * 100.0) / TT_SIZE;
-        double hitRate = positionsSearched > 0 ? (ttHits * 100.0) / positionsSearched : 0;
-        double collisionRate = ttCollisions > 0 ? (ttCollisions * 100.0) / usedEntries : 0;
-
-        Console.WriteLine($"TT Stats:");
-        Console.WriteLine($"  Size: {usedEntries:N0} / {TT_SIZE:N0} ({fillPercentage:F2}% full)");
-        Console.WriteLine($"  Hits: {ttHits:N0} ({hitRate:F2}% of positions)");
-        Console.WriteLine($"  Collisions: {ttCollisions:N0} ({collisionRate:F2}% of entries)");
-    }
-
     private int MoveOrdering(Move move, Board board, int ply = 0)
     {
         int score = 0;
