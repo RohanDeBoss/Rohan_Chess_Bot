@@ -4,11 +4,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-//My2ndBot v0.4 TT is now an array, and code is much cleaner!
+//My2ndBot v0.5 Butterfly table + pawn grain with piece square table.
 public class MyBot : IChessBot
 {
     private const bool ConstantDepth = true;
-    private const short MaxDepth = 4;
+    private const short MaxDepth = 6;
     private const short InfiniteScore = 30000; //less than 32k so that it fits into short!
     private const int TT_SIZE = 1048576;
     private const short TimeSpentFractionofTotal = 20;
@@ -64,9 +64,9 @@ public class MyBot : IChessBot
             if (!foundLegalMove || depth >= safetymaxdepth) break; // Exit if no moves were found or depth>=150
             depth++; // Increase depth for the next iteration
         }
-
         if (bestMove == Move.NullMove && legalMoves.Length > 0)
             bestMove = legalMoves[0];
+
         //TT loop
         int usedEntries = tt.Count(entry => entry.Key != 0);
         double fillPercentage = (usedEntries * 100.0) / TT_SIZE;
@@ -76,8 +76,11 @@ public class MyBot : IChessBot
         Console.WriteLine($"MyBot eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
         Console.WriteLine($"MyBot Positions searched: {positionsSearched:N0}");
         Console.WriteLine($"TT Size: {usedEntries:N0} / {TT_SIZE:N0} ({fillPercentage:F2}% full)");
+
         return bestMove;
     }
+
+    private int[,] butterflyTable = new int[64, 64]; // Stores frequencies for [from, to] squares
 
     private int MoveOrdering(Move move, Board board, int ply = 0)
     {
@@ -99,7 +102,8 @@ public class MyBot : IChessBot
         if (move == killerMoves[ply * 2] || move == killerMoves[ply * 2 + 1])
             score += 90000;
 
-        score += historyMoves[move.StartSquare.Index, move.TargetSquare.Index];
+        score += historyMoves[move.StartSquare.Index, move.TargetSquare.Index] + butterflyTable[move.StartSquare.Index, move.TargetSquare.Index];
+
 
         if (move.IsPromotion)
             score += 80000 + GetPieceValue(move.PromotionPieceType);
@@ -109,6 +113,7 @@ public class MyBot : IChessBot
 
     private Move[] killerMoves = new Move[100 * 2];
     private int[,] historyMoves = new int[64, 64];
+
 
     private void UpdateKillerMoves(Move move, int ply)
     {
@@ -229,10 +234,12 @@ public class MyBot : IChessBot
                 {
                     UpdateKillerMoves(move, ply);
                     UpdateHistoryMove(move, depth);
+                    butterflyTable[move.StartSquare.Index, move.TargetSquare.Index]++; // Increment butterfly table on cutoff
                     AddTT(key, depth, (short)beta, BETA, move);
                 }
                 return beta;
             }
+
             moveCount++;
         }
 
@@ -263,16 +270,16 @@ public class MyBot : IChessBot
     private ulong lastBoardHash;
     private bool IsEndgame(Board board)
     {
-    ulong currentBoardHash = board.ZobristKey; // Unique identifier for board state
+        ulong currentBoardHash = board.ZobristKey; // Unique identifier for board state
 
-    // Update cached piece count only if the board has changed
-    if (currentBoardHash != lastBoardHash)
-    {
-        cachedPieceCount = BitOperations.PopCount(board.AllPiecesBitboard);
-        lastBoardHash = currentBoardHash;
-    }
+        // Update cached piece count only if the board has changed
+        if (currentBoardHash != lastBoardHash)
+        {
+            cachedPieceCount = BitOperations.PopCount(board.AllPiecesBitboard);
+            lastBoardHash = currentBoardHash;
+        }
 
-    return cachedPieceCount <= 12; // Threshold can be adjusted as needed
+        return cachedPieceCount <= 12; // Threshold can be adjusted as needed
     }
 
     private int GetPieceValue(PieceType pieceType)
