@@ -75,7 +75,7 @@ public class MyBot : IChessBot
         Console.WriteLine($"MyBot Depth: {depth - 1}");
         Console.WriteLine($"MyBot eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
         Console.WriteLine($"MyBot Positions searched: {positionsSearched:N0}");
-        Console.WriteLine($"TT Size: {usedEntries:N0} / {TT_SIZE:N0} ({fillPercentage:F2}% full)");
+        Console.WriteLine($"TT Size: {usedEntries:N0} / {TT_SIZE:N0} ({fillPercentage:F2}%)");
 
         return bestMove;
     }

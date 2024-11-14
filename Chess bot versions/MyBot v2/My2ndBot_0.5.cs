@@ -4,11 +4,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-//My2ndBot v0.5 Butterfly table + pawn grain with piece square table.
+//My2ndBot v0.5 WOK (reworked move ordering)
 public class MyBot : IChessBot
 {
     private const bool ConstantDepth = true;
-    private const short MaxDepth = 6;
+    private const short MaxDepth = 3;
     private const short InfiniteScore = 30000; //less than 32k so that it fits into short!
     private const int TT_SIZE = 1048576;
     private const short TimeSpentFractionofTotal = 20;
@@ -64,9 +64,9 @@ public class MyBot : IChessBot
             if (!foundLegalMove || depth >= safetymaxdepth) break; // Exit if no moves were found or depth>=150
             depth++; // Increase depth for the next iteration
         }
+
         if (bestMove == Move.NullMove && legalMoves.Length > 0)
             bestMove = legalMoves[0];
-
         //TT loop
         int usedEntries = tt.Count(entry => entry.Key != 0);
         double fillPercentage = (usedEntries * 100.0) / TT_SIZE;
@@ -75,45 +75,42 @@ public class MyBot : IChessBot
         Console.WriteLine($"MyBot Depth: {depth - 1}");
         Console.WriteLine($"MyBot eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
         Console.WriteLine($"MyBot Positions searched: {positionsSearched:N0}");
-        Console.WriteLine($"TT Size: {usedEntries:N0} / {TT_SIZE:N0} ({fillPercentage:F2}% full)");
-
+        Console.WriteLine($"TT Size: {usedEntries:N0} / {TT_SIZE:N0} ({fillPercentage:F2}%)");
         return bestMove;
     }
 
-    private int[,] butterflyTable = new int[64, 64]; // Stores frequencies for [from, to] squares
-
     private int MoveOrdering(Move move, Board board, int ply = 0)
     {
-        int score = 0;
         ulong key = board.ZobristKey;
         int index = (int)(key % TT_SIZE);
 
+        // Prioritize transposition table moves.
         if (tt[index].Key == key && tt[index].BestMove == move)
             return 1000000;
 
-        PieceType capturedPieceType = board.GetPiece(move.TargetSquare).PieceType;
-        if (capturedPieceType != PieceType.None)
+        int score = historyMoves[move.StartSquare.Index, move.TargetSquare.Index];
+
+        // Captures: MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
+        var capturedPiece = board.GetPiece(move.TargetSquare);
+        if (capturedPiece.PieceType != PieceType.None)
         {
-            int attackerValue = GetPieceValue(board.GetPiece(move.StartSquare).PieceType);
-            int victimValue = GetPieceValue(capturedPieceType);
-            score += 100000 + (victimValue * 10 - attackerValue);
+            score += 100000 + GetPieceValue(capturedPiece.PieceType) * 10 -
+                     GetPieceValue(board.GetPiece(move.StartSquare).PieceType);
         }
 
-        if (move == killerMoves[ply * 2] || move == killerMoves[ply * 2 + 1])
-            score += 90000;
-
-        score += historyMoves[move.StartSquare.Index, move.TargetSquare.Index] + butterflyTable[move.StartSquare.Index, move.TargetSquare.Index];
-
-
+        // Promotion moves.
         if (move.IsPromotion)
             score += 80000 + GetPieceValue(move.PromotionPieceType);
+
+        // Killer moves.
+        if (move == killerMoves[ply * 2] || move == killerMoves[ply * 2 + 1])
+            score += 90000;
 
         return score;
     }
 
     private Move[] killerMoves = new Move[100 * 2];
     private int[,] historyMoves = new int[64, 64];
-
 
     private void UpdateKillerMoves(Move move, int ply)
     {
@@ -234,12 +231,10 @@ public class MyBot : IChessBot
                 {
                     UpdateKillerMoves(move, ply);
                     UpdateHistoryMove(move, depth);
-                    butterflyTable[move.StartSquare.Index, move.TargetSquare.Index]++; // Increment butterfly table on cutoff
                     AddTT(key, depth, (short)beta, BETA, move);
                 }
                 return beta;
             }
-
             moveCount++;
         }
 

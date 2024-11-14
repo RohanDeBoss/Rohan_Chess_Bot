@@ -4,11 +4,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-//My2ndBot v0.4 TT is now an array, and code is much cleaner!
+//My2ndBot v0.5 WOK (reworked move ordering)
 public class MyBot : IChessBot
 {
     private const bool ConstantDepth = true;
-    private const short MaxDepth = 4;
+    private const short MaxDepth = 3;
     private const short InfiniteScore = 30000; //less than 32k so that it fits into short!
     private const int TT_SIZE = 1048576;
     private const short TimeSpentFractionofTotal = 20;
@@ -75,34 +75,36 @@ public class MyBot : IChessBot
         Console.WriteLine($"MyBot Depth: {depth - 1}");
         Console.WriteLine($"MyBot eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
         Console.WriteLine($"MyBot Positions searched: {positionsSearched:N0}");
-        Console.WriteLine($"TT Size: {usedEntries:N0} / {TT_SIZE:N0} ({fillPercentage:F2}% full)");
+        Console.WriteLine($"TT Size: {usedEntries:N0} / {TT_SIZE:N0} ({fillPercentage:F2}%)");
         return bestMove;
     }
 
     private int MoveOrdering(Move move, Board board, int ply = 0)
     {
-        int score = 0;
         ulong key = board.ZobristKey;
         int index = (int)(key % TT_SIZE);
 
+        // Prioritize transposition table moves.
         if (tt[index].Key == key && tt[index].BestMove == move)
             return 1000000;
 
-        PieceType capturedPieceType = board.GetPiece(move.TargetSquare).PieceType;
-        if (capturedPieceType != PieceType.None)
+        int score = historyMoves[move.StartSquare.Index, move.TargetSquare.Index];
+
+        // Captures: MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
+        var capturedPiece = board.GetPiece(move.TargetSquare);
+        if (capturedPiece.PieceType != PieceType.None)
         {
-            int attackerValue = GetPieceValue(board.GetPiece(move.StartSquare).PieceType);
-            int victimValue = GetPieceValue(capturedPieceType);
-            score += 100000 + (victimValue * 10 - attackerValue);
+            score += 100000 + GetPieceValue(capturedPiece.PieceType) * 10 -
+                     GetPieceValue(board.GetPiece(move.StartSquare).PieceType);
         }
 
-        if (move == killerMoves[ply * 2] || move == killerMoves[ply * 2 + 1])
-            score += 90000;
-
-        score += historyMoves[move.StartSquare.Index, move.TargetSquare.Index];
-
+        // Promotion moves.
         if (move.IsPromotion)
             score += 80000 + GetPieceValue(move.PromotionPieceType);
+
+        // Killer moves.
+        if (move == killerMoves[ply * 2] || move == killerMoves[ply * 2 + 1])
+            score += 90000;
 
         return score;
     }
