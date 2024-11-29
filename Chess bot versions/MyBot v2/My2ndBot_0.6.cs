@@ -5,10 +5,10 @@ using System.Linq;
 using System.Numerics;
 
 //My2ndBot v0.5 reworked move ordering (Need to fix draws being encouraged when it shouldn't)
-public class EvilBot : IChessBot
+public class MyBot : IChessBot
 {
     private const bool ConstantDepth = true;
-    private const short MaxDepth = 1;
+    private const short MaxDepth = 2;
     private const short InfiniteScore = 30000; //less than 32k so that it fits into short!
     private const int TT_SIZE = 1048576;
     private const short TimeSpentFractionofTotal = 18;
@@ -72,10 +72,10 @@ public class EvilBot : IChessBot
         double fillPercentage = (usedEntries * 100.0) / TT_SIZE;
 
         Console.WriteLine(" ");
-        Console.WriteLine($"Evil Depth: {depth - 1}");
-        Console.WriteLine($"Evil eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
-        Console.WriteLine($"Evil Positions: {positionsSearched:N0}");
-        Console.WriteLine($"Evil TT Size: ({fillPercentage:F2}%)");
+        Console.WriteLine($"MyBot Depth: {depth - 1}");
+        Console.WriteLine($"MyBot eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
+        Console.WriteLine($"MyBot Positions: {positionsSearched:N0}");
+        Console.WriteLine($"MyBot TT Size: ({fillPercentage:F2}%)");
         return bestMove;
     }
 
@@ -282,20 +282,12 @@ public class EvilBot : IChessBot
         return board.IsWhiteToMove ? score : -score;
     }
 
-    private int cachedPieceCount = -1;
-    private ulong lastBoardHash;
     private bool IsEndgame(Board board)
     {
-        ulong currentBoardHash = board.ZobristKey; // Unique identifier for board state
-
-        if (currentBoardHash != lastBoardHash)
-        {
-            cachedPieceCount = BitOperations.PopCount(board.AllPiecesBitboard);
-            lastBoardHash = currentBoardHash;
-        }
-
-        return cachedPieceCount <= 12; // Threshold can be adjusted as needed
+        int pieceCount = BitOperations.PopCount(board.AllPiecesBitboard);
+        return pieceCount <= 12; // You can adjust this threshold as needed
     }
+
 
     //Get rid of this?
     private int GetPieceValue(PieceType pieceType)

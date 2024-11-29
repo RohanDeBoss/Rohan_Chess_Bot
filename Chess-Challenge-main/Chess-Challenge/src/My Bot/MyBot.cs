@@ -4,14 +4,14 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-//My2ndBot v0.5 WOK (reworked move ordering)
+//My2ndBot v0.5 reworked move ordering (Need to fix draws being encouraged when it shouldn't)
 public class MyBot : IChessBot
 {
     private const bool ConstantDepth = true;
-    private const short MaxDepth = 3;
+    private const short MaxDepth = 2;
     private const short InfiniteScore = 30000; //less than 32k so that it fits into short!
     private const int TT_SIZE = 1048576;
-    private const short TimeSpentFractionofTotal = 20;
+    private const short TimeSpentFractionofTotal = 18;
 
     private const byte R = 2;
     private const byte LMR_THRESHOLD = 2;
@@ -34,7 +34,7 @@ public class MyBot : IChessBot
         short depth = 1;
 
         var legalMoves = board.GetLegalMoves();
-        if (legalMoves.Length == 1) return legalMoves[0]; // Return immediately if only one move is possible
+        if (legalMoves.Length == 1) return legalMoves[0]; // Return immediately if only one legal move
 
         // Iterative Deepening with time management when ConstantDepth is false
         int maxTimeForTurn = ConstantDepth ? int.MaxValue :
@@ -74,8 +74,8 @@ public class MyBot : IChessBot
         Console.WriteLine(" ");
         Console.WriteLine($"MyBot Depth: {depth - 1}");
         Console.WriteLine($"MyBot eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
-        Console.WriteLine($"MyBot Positions searched: {positionsSearched:N0}");
-        Console.WriteLine($"TT Size: {usedEntries:N0} / {TT_SIZE:N0} ({fillPercentage:F2}%)");
+        Console.WriteLine($"MyBot Positions: {positionsSearched:N0}");
+        Console.WriteLine($"MyBot TT Size: ({fillPercentage:F2}%)");
         return bestMove;
     }
 
@@ -165,7 +165,7 @@ public class MyBot : IChessBot
         if (board.IsInCheckmate())
             return -InfiniteScore - depth;
         if (board.IsDraw())
-            return board.IsWhiteToMove ? -40 : 40;
+            return board.IsWhiteToMove ? -40 : 40; //still buggy
 
         ulong key = board.ZobristKey;
         int index = (int)(key % TT_SIZE);
@@ -265,18 +265,18 @@ public class MyBot : IChessBot
     private ulong lastBoardHash;
     private bool IsEndgame(Board board)
     {
-    ulong currentBoardHash = board.ZobristKey; // Unique identifier for board state
+        ulong currentBoardHash = board.ZobristKey; // Unique identifier for board state
 
-    // Update cached piece count only if the board has changed
-    if (currentBoardHash != lastBoardHash)
-    {
-        cachedPieceCount = BitOperations.PopCount(board.AllPiecesBitboard);
-        lastBoardHash = currentBoardHash;
+        if (currentBoardHash != lastBoardHash)
+        {
+            cachedPieceCount = BitOperations.PopCount(board.AllPiecesBitboard);
+            lastBoardHash = currentBoardHash;
+        }
+
+        return cachedPieceCount <= 12; // Threshold can be adjusted as needed
     }
 
-    return cachedPieceCount <= 12; // Threshold can be adjusted as needed
-    }
-
+    //Get rid of this?
     private int GetPieceValue(PieceType pieceType)
     {
         return pieceType switch
@@ -291,6 +291,7 @@ public class MyBot : IChessBot
         };
     }
 
+    //Get rid of this?
     private int[,] GetAdjustmentTable(PieceType pieceType, bool isEndgame) =>
         pieceType switch
         {
@@ -323,7 +324,7 @@ public class MyBot : IChessBot
         if (tt[index].Key == 0 || tt[index].Depth <= depth)
             tt[index] = new TTEntry { Key = key, Depth = (short)depth, Score = score, Flag = flag, BestMove = bestMove };
     }
-
+    //Add more grain for determinism?
     private static readonly int[,] PawnTable = {
         {0,  0,  0,  0,  0,  0,  0,  0},
         {50, 50, 50, 50, 50, 50, 50, 50},
