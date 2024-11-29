@@ -8,7 +8,7 @@ using System.Numerics;
 public class MyBot : IChessBot
 {
     private const bool ConstantDepth = true;
-    private const short MaxDepth = 2;
+    private const short MaxDepth = 1;
     private const short InfiniteScore = 30000; //less than 32k so that it fits into short!
     private const int TT_SIZE = 1048576;
     private const short TimeSpentFractionofTotal = 18;
@@ -282,12 +282,20 @@ public class MyBot : IChessBot
         return board.IsWhiteToMove ? score : -score;
     }
 
+    private int cachedPieceCount = -1;
+    private ulong lastBoardHash;
     private bool IsEndgame(Board board)
     {
-        int pieceCount = BitOperations.PopCount(board.AllPiecesBitboard);
-        return pieceCount <= 12; // You can adjust this threshold as needed
-    }
+        ulong currentBoardHash = board.ZobristKey; // Unique identifier for board state
 
+        if (currentBoardHash != lastBoardHash)
+        {
+            cachedPieceCount = BitOperations.PopCount(board.AllPiecesBitboard);
+            lastBoardHash = currentBoardHash;
+        }
+
+        return cachedPieceCount <= 12; // Threshold can be adjusted as needed
+    }
 
     //Get rid of this?
     private int GetPieceValue(PieceType pieceType)

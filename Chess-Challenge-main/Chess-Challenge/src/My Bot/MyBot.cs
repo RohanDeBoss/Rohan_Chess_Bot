@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-//My2ndBot v0.5 reworked move ordering (Need to fix draws being encouraged when it shouldn't)
+//My2ndBot v0.5 Normal eval, normal buggy draw, cashing engame check
 public class MyBot : IChessBot
 {
     private const bool ConstantDepth = true;
@@ -261,6 +261,7 @@ public class MyBot : IChessBot
         return board.IsWhiteToMove ? score : -score;
     }
 
+    //Cashed pieces
     private int cachedPieceCount = -1;
     private ulong lastBoardHash;
     private bool IsEndgame(Board board)

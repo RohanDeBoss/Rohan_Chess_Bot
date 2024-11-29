@@ -4,11 +4,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-//My2ndBot v0.5 reworked move ordering (Need to fix draws being encouraged when it shouldn't)
+//My2ndBot v0.5 New eval, normal buggy draw, cashing engame check
 public class EvilBot : IChessBot
 {
     private const bool ConstantDepth = true;
-    private const short MaxDepth = 1;
+    private const short MaxDepth = 2;
     private const short InfiniteScore = 30000; //less than 32k so that it fits into short!
     private const int TT_SIZE = 1048576;
     private const short TimeSpentFractionofTotal = 18;
@@ -165,7 +165,7 @@ public class EvilBot : IChessBot
         if (board.IsInCheckmate())
             return -InfiniteScore - depth;
         if (board.IsDraw())
-            return Evaluate(board, depth);
+            return board.IsWhiteToMove ? -40 : 40; //still buggy
 
         ulong key = board.ZobristKey;
         int index = (int)(key % TT_SIZE);
@@ -259,7 +259,7 @@ public class EvilBot : IChessBot
             }
         }
 
-        if (!isEndgame)
+        if (!isEndgame) //Experimental opponent development negative reward
         {
             // Define the middle 16 squares (D3-E6 in chess notation)
             var middleSquares = new List<Square>
@@ -272,16 +272,14 @@ public class EvilBot : IChessBot
             foreach (var square in middleSquares)
             {
                 if (board.SquareIsAttackedByOpponent(square))
-                    score += -3; // Apply your scoring logic
+                    score += -3; // Apply - rewards
             }
         }
-
-        if (board.IsDraw())
-            return board.IsWhiteToMove ? -30 : 30;
 
         return board.IsWhiteToMove ? score : -score;
     }
 
+    //Cashed version
     private int cachedPieceCount = -1;
     private ulong lastBoardHash;
     private bool IsEndgame(Board board)
@@ -345,6 +343,7 @@ public class EvilBot : IChessBot
         if (tt[index].Key == 0 || tt[index].Depth <= depth)
             tt[index] = new TTEntry { Key = key, Depth = (short)depth, Score = score, Flag = flag, BestMove = bestMove };
     }
+
     //Add more grain for determinism?
     private static readonly int[,] PawnTable = {
         {0,  0,  0,  0,  0,  0,  0,  0},
