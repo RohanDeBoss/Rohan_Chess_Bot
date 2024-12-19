@@ -4,11 +4,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-//My2ndBot v0.5 reworked move ordering (Need to fix draws being encouraged when it shouldn't)
+//My2ndBot v0.6 Bug fixes and experimental features removed draw has to be 0 now!
 public class MyBot : IChessBot
 {
     private const bool ConstantDepth = true;
-    private const short MaxDepth = 1;
+    private const short MaxDepth = 3;
     private const short InfiniteScore = 30000; //less than 32k so that it fits into short!
     private const int TT_SIZE = 1048576;
     private const short TimeSpentFractionofTotal = 18;
@@ -67,6 +67,7 @@ public class MyBot : IChessBot
 
         if (bestMove == Move.NullMove && legalMoves.Length > 0)
             bestMove = legalMoves[0];
+
         //TT loop
         int usedEntries = tt.Count(entry => entry.Key != 0);
         double fillPercentage = (usedEntries * 100.0) / TT_SIZE;
@@ -162,10 +163,11 @@ public class MyBot : IChessBot
     private int Negamax(Board board, int depth, int alpha, int beta, int ply)
     {
         positionsSearched++;
+
+        if (board.IsDraw())
+            return 0; //Always 0
         if (board.IsInCheckmate())
             return -InfiniteScore - depth;
-        if (board.IsDraw())
-            return Evaluate(board, depth);
 
         ulong key = board.ZobristKey;
         int index = (int)(key % TT_SIZE);
@@ -248,6 +250,9 @@ public class MyBot : IChessBot
         int score = 0;
         bool isEndgame = IsEndgame(board);
 
+        if (board.IsDraw())
+            return 0; //Always 0
+
         foreach (PieceList pieceList in board.GetAllPieceLists())
         {
             int pieceValue = GetPieceValue(pieceList.TypeOfPieceInList);
@@ -259,45 +264,28 @@ public class MyBot : IChessBot
             }
         }
 
-        if (!isEndgame)
-        {
-            // Define the middle 16 squares (D3-E6 in chess notation)
-            var middleSquares = new List<Square>
-        {
-            new Square(3, 2), new Square(3, 3), new Square(3, 4), new Square(3, 5),
-            new Square(4, 2), new Square(4, 3), new Square(4, 4), new Square(4, 5)
-        };
-
-            // Check each of the middle 16 squares
-            foreach (var square in middleSquares)
-            {
-                if (board.SquareIsAttackedByOpponent(square))
-                    score += -3; // Apply your scoring logic
-            }
-        }
-
-        if (board.IsDraw())
-            return board.IsWhiteToMove ? -30 : 30;
-
         return board.IsWhiteToMove ? score : -score;
     }
 
     private int cachedPieceCount = -1;
     private ulong lastBoardHash;
+
     private bool IsEndgame(Board board)
     {
-        ulong currentBoardHash = board.ZobristKey; // Unique identifier for board state
+        ulong currentBoardHash = board.ZobristKey;
 
+        // Update cached data if the board state has changed
         if (currentBoardHash != lastBoardHash)
         {
             cachedPieceCount = BitOperations.PopCount(board.AllPiecesBitboard);
             lastBoardHash = currentBoardHash;
         }
 
-        return cachedPieceCount <= 12; // Threshold can be adjusted as needed
+        // Check if the game is in an endgame phase
+        const int endgameThreshold = 12;
+        return cachedPieceCount <= endgameThreshold;
     }
 
-    //Get rid of this?
     private int GetPieceValue(PieceType pieceType)
     {
         return pieceType switch
@@ -312,7 +300,6 @@ public class MyBot : IChessBot
         };
     }
 
-    //Get rid of this?
     private int[,] GetAdjustmentTable(PieceType pieceType, bool isEndgame) =>
         pieceType switch
         {
@@ -345,7 +332,8 @@ public class MyBot : IChessBot
         if (tt[index].Key == 0 || tt[index].Depth <= depth)
             tt[index] = new TTEntry { Key = key, Depth = (short)depth, Score = score, Flag = flag, BestMove = bestMove };
     }
-    //Add more grain for determinism?
+
+    //Piece square table bitboards
     private static readonly int[,] PawnTable = {
         {0,  0,  0,  0,  0,  0,  0,  0},
         {50, 50, 50, 50, 50, 50, 50, 50},

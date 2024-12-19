@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-//My2ndBot v0.5 Normal eval best!, normal buggy draw, cashing endgame check
+//My2ndBot v0.6 Bug fixes and experimental features removed draw has to be 0 now!
 public class EvilBot : IChessBot
 {
     private const bool ConstantDepth = true;
@@ -67,6 +67,7 @@ public class EvilBot : IChessBot
 
         if (bestMove == Move.NullMove && legalMoves.Length > 0)
             bestMove = legalMoves[0];
+
         //TT loop
         int usedEntries = tt.Count(entry => entry.Key != 0);
         double fillPercentage = (usedEntries * 100.0) / TT_SIZE;
@@ -162,10 +163,11 @@ public class EvilBot : IChessBot
     private int Negamax(Board board, int depth, int alpha, int beta, int ply)
     {
         positionsSearched++;
+
+        if (board.IsDraw())
+            return 0; //Always 0
         if (board.IsInCheckmate())
             return -InfiniteScore - depth;
-        if (board.IsDraw())
-            return 0; //still buggy
 
         ulong key = board.ZobristKey;
         int index = (int)(key % TT_SIZE);
@@ -248,6 +250,9 @@ public class EvilBot : IChessBot
         int score = 0;
         bool isEndgame = IsEndgame(board);
 
+        if (board.IsDraw())
+            return 0; //Always 0
+
         foreach (PieceList pieceList in board.GetAllPieceLists())
         {
             int pieceValue = GetPieceValue(pieceList.TypeOfPieceInList);
@@ -262,23 +267,25 @@ public class EvilBot : IChessBot
         return board.IsWhiteToMove ? score : -score;
     }
 
-    //Cashed version
     private int cachedPieceCount = -1;
     private ulong lastBoardHash;
+
     private bool IsEndgame(Board board)
     {
-        ulong currentBoardHash = board.ZobristKey; // Unique identifier for board state
+        ulong currentBoardHash = board.ZobristKey;
 
+        // Update cached data if the board state has changed
         if (currentBoardHash != lastBoardHash)
         {
             cachedPieceCount = BitOperations.PopCount(board.AllPiecesBitboard);
             lastBoardHash = currentBoardHash;
         }
 
-        return cachedPieceCount <= 12; // Threshold can be adjusted as needed
+        // Check if the game is in an endgame phase
+        const int endgameThreshold = 12;
+        return cachedPieceCount <= endgameThreshold;
     }
 
-    //Get rid of this?
     private int GetPieceValue(PieceType pieceType)
     {
         return pieceType switch
@@ -293,7 +300,6 @@ public class EvilBot : IChessBot
         };
     }
 
-    //Get rid of this?
     private int[,] GetAdjustmentTable(PieceType pieceType, bool isEndgame) =>
         pieceType switch
         {
@@ -327,7 +333,7 @@ public class EvilBot : IChessBot
             tt[index] = new TTEntry { Key = key, Depth = (short)depth, Score = score, Flag = flag, BestMove = bestMove };
     }
 
-    //Add more grain for determinism?
+    //Piece square table bitboards
     private static readonly int[,] PawnTable = {
         {0,  0,  0,  0,  0,  0,  0,  0},
         {50, 50, 50, 50, 50, 50, 50, 50},

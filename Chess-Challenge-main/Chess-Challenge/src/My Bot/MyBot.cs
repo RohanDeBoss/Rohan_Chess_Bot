@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-//My2ndBot v0.5 TT Problem!, new draw same values (doesn't fix), cashing endgame check
+//My2ndBot v0.6 Bug fixes and experimental features removed draw has to be 0 now!
 public class MyBot : IChessBot
 {
     private const bool ConstantDepth = true;
@@ -67,6 +67,7 @@ public class MyBot : IChessBot
 
         if (bestMove == Move.NullMove && legalMoves.Length > 0)
             bestMove = legalMoves[0];
+
         //TT loop
         int usedEntries = tt.Count(entry => entry.Key != 0);
         double fillPercentage = (usedEntries * 100.0) / TT_SIZE;
@@ -164,7 +165,7 @@ public class MyBot : IChessBot
         positionsSearched++;
 
         if (board.IsDraw())
-            return 0;
+            return 0; //Always 0
         if (board.IsInCheckmate())
             return -InfiniteScore - depth;
         
@@ -250,7 +251,7 @@ public class MyBot : IChessBot
         bool isEndgame = IsEndgame(board);
 
         if (board.IsDraw())
-            return 0;
+            return 0; //Always 0
 
         foreach (PieceList pieceList in board.GetAllPieceLists())
         {
@@ -285,7 +286,6 @@ public class MyBot : IChessBot
         return cachedPieceCount <= endgameThreshold;
     }
 
-    //Get rid of this?
     private int GetPieceValue(PieceType pieceType)
     {
         return pieceType switch
@@ -300,7 +300,6 @@ public class MyBot : IChessBot
         };
     }
 
-    //Get rid of this?
     private int[,] GetAdjustmentTable(PieceType pieceType, bool isEndgame) =>
         pieceType switch
         {
@@ -333,7 +332,8 @@ public class MyBot : IChessBot
         if (tt[index].Key == 0 || tt[index].Depth <= depth)
             tt[index] = new TTEntry { Key = key, Depth = (short)depth, Score = score, Flag = flag, BestMove = bestMove };
     }
-    //Add more grain for determinism?
+
+    //Piece square table bitboards
     private static readonly int[,] PawnTable = {
         {0,  0,  0,  0,  0,  0,  0,  0},
         {50, 50, 50, 50, 50, 50, 50, 50},
