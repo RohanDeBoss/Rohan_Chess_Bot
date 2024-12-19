@@ -4,11 +4,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-//My2ndBot v0.5 Normal eval, normal buggy draw, cashing engame check
+//My2ndBot v0.5 TT Problem!, new draw same values (doesn't fix), cashing endgame check
 public class MyBot : IChessBot
 {
     private const bool ConstantDepth = true;
-    private const short MaxDepth = 2;
+    private const short MaxDepth = 3;
     private const short InfiniteScore = 30000; //less than 32k so that it fits into short!
     private const int TT_SIZE = 1048576;
     private const short TimeSpentFractionofTotal = 18;
@@ -162,11 +162,12 @@ public class MyBot : IChessBot
     private int Negamax(Board board, int depth, int alpha, int beta, int ply)
     {
         positionsSearched++;
+
+        if (board.IsDraw())
+            return 0;
         if (board.IsInCheckmate())
             return -InfiniteScore - depth;
-        if (board.IsDraw())
-            return board.IsWhiteToMove ? -40 : 40; //still buggy
-
+        
         ulong key = board.ZobristKey;
         int index = (int)(key % TT_SIZE);
         if (tt[index].Key == key && tt[index].Depth >= depth)
@@ -248,6 +249,9 @@ public class MyBot : IChessBot
         int score = 0;
         bool isEndgame = IsEndgame(board);
 
+        if (board.IsDraw())
+            return 0;
+
         foreach (PieceList pieceList in board.GetAllPieceLists())
         {
             int pieceValue = GetPieceValue(pieceList.TypeOfPieceInList);
@@ -258,23 +262,27 @@ public class MyBot : IChessBot
                 score += (piece.IsWhite ? 1 : -1) * (adjustmentTable[rank, piece.Square.File] + pieceValue);
             }
         }
+
         return board.IsWhiteToMove ? score : -score;
     }
 
-    //Cashed pieces
     private int cachedPieceCount = -1;
     private ulong lastBoardHash;
+
     private bool IsEndgame(Board board)
     {
-        ulong currentBoardHash = board.ZobristKey; // Unique identifier for board state
+        ulong currentBoardHash = board.ZobristKey;
 
+        // Update cached data if the board state has changed
         if (currentBoardHash != lastBoardHash)
         {
             cachedPieceCount = BitOperations.PopCount(board.AllPiecesBitboard);
             lastBoardHash = currentBoardHash;
         }
 
-        return cachedPieceCount <= 12; // Threshold can be adjusted as needed
+        // Check if the game is in an endgame phase
+        const int endgameThreshold = 12;
+        return cachedPieceCount <= endgameThreshold;
     }
 
     //Get rid of this?

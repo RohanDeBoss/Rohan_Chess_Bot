@@ -4,11 +4,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-//My2ndBot v0.5 New eval, normal buggy draw, cashing engame check
+//My2ndBot v0.5 Normal eval best!, normal buggy draw, cashing endgame check
 public class EvilBot : IChessBot
 {
     private const bool ConstantDepth = true;
-    private const short MaxDepth = 2;
+    private const short MaxDepth = 3;
     private const short InfiniteScore = 30000; //less than 32k so that it fits into short!
     private const int TT_SIZE = 1048576;
     private const short TimeSpentFractionofTotal = 18;
@@ -165,7 +165,7 @@ public class EvilBot : IChessBot
         if (board.IsInCheckmate())
             return -InfiniteScore - depth;
         if (board.IsDraw())
-            return board.IsWhiteToMove ? -40 : 40; //still buggy
+            return 0; //still buggy
 
         ulong key = board.ZobristKey;
         int index = (int)(key % TT_SIZE);
@@ -256,23 +256,6 @@ public class EvilBot : IChessBot
             {
                 int rank = piece.IsWhite ? 7 - piece.Square.Rank : piece.Square.Rank;
                 score += (piece.IsWhite ? 1 : -1) * (adjustmentTable[rank, piece.Square.File] + pieceValue);
-            }
-        }
-
-        if (!isEndgame) //Experimental opponent development negative reward
-        {
-            // Define the middle 16 squares (D3-E6 in chess notation)
-            var middleSquares = new List<Square>
-        {
-            new Square(3, 2), new Square(3, 3), new Square(3, 4), new Square(3, 5),
-            new Square(4, 2), new Square(4, 3), new Square(4, 4), new Square(4, 5)
-        };
-
-            // Check each of the middle 16 squares
-            foreach (var square in middleSquares)
-            {
-                if (board.SquareIsAttackedByOpponent(square))
-                    score += -3; // Apply - rewards
             }
         }
 
