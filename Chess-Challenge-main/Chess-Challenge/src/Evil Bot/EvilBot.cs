@@ -8,7 +8,7 @@ using System.Numerics;
 public class EvilBot : IChessBot
 {
     // Constants
-    private const bool ConstantDepth = false;
+    private const bool ConstantDepth = true;
     private const short MaxDepth = 5;
     private const short InfiniteScore = 30000; // Less than 32k to fit into short
     private const int TT_SIZE = 1 << 21; // 2097152 Max size
