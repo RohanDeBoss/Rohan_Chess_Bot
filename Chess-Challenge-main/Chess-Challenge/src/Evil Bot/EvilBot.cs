@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-//My2ndBot v0.7 Time management, reorganising code, small bug fixes/improvements
+//My2ndBot v0.8
 public class EvilBot : IChessBot
 {
     // Constants
@@ -47,53 +47,100 @@ public class EvilBot : IChessBot
         Move bestMove = Move.NullMove;
         positionsSearched = 0;
         short depth = 1;
-        bestScore = 0;
+        int previousBestScore = 0;
         Move previousBestMove = Move.NullMove;
-        short safetymaxdepth = 99;
         var legalMoves = board.GetLegalMoves();
-        if (legalMoves.Length == 1) return EvalLog(legalMoves[0], board, depth);
 
-        // Time management based on game phase
+        // Immediate checkmate check
+        foreach (Move move in legalMoves)
+        {
+            if (IsCheckmateMove(move, board))
+                return EvalLog(move, board, 1);
+        }
+        if (legalMoves.Length == 0) return Move.NullMove; // Should never happen
+
+        const int InitialAspirationWindow = 125;
+        const int MaxAspirationDepth = 4;
+        const int CheckmateScoreThreshold = 25000;
+
         int maxTimeForTurn = ConstantDepth ? int.MaxValue :
-        (timer.MillisecondsRemaining / TimeSpentFractionofTotal) + (timer.IncrementMilliseconds / 3);
+            (timer.MillisecondsRemaining / TimeSpentFractionofTotal) + (timer.IncrementMilliseconds / 3);
 
         while ((ConstantDepth && depth <= MaxDepth) || (!ConstantDepth && timer.MillisecondsElapsedThisTurn < maxTimeForTurn))
         {
-            bool foundLegalMove = false;
-            // Order moves with previous best move first
-            var orderedMoves = new List<Move>();
-            if (previousBestMove != Move.NullMove && legalMoves.Contains(previousBestMove))
-                orderedMoves.Add(previousBestMove);
-            orderedMoves.AddRange(legalMoves.Where(m => m != previousBestMove)
-                .OrderByDescending(move => MoveOrdering(move, board)));
+            bool useAspiration = depth > MaxAspirationDepth &&
+                                Math.Abs(previousBestScore) < CheckmateScoreThreshold;
 
-            foreach (Move move in orderedMoves)
+            int alpha = -InfiniteScore;
+            int beta = InfiniteScore;
+            int aspirationWindow = InitialAspirationWindow;
+
+            bool aspirationFailed;
+            int searchCount = 0;
+
+            do
             {
-                // Stop searching if we're running low on time
-                if (!ConstantDepth && timer.MillisecondsElapsedThisTurn >= maxTimeForTurn)
-                    return EvalLog(bestMove != Move.NullMove ? bestMove : orderedMoves[0], board, depth);
+                aspirationFailed = false;
+                int currentBestScore = -InfiniteScore;
+                bestMove = legalMoves[0]; // Default to first move
 
-                if (IsCheckmateMove(move, board)) return EvalLog(move, board, depth);
+                // Always refresh TT entry for current position
+                ulong currentKey = board.ZobristKey;
+                TTEntry ttEntry = tt[GetTTIndex(currentKey)];
 
-                board.MakeMove(move);
-                int score = -Negamax(board, depth - 1, -InfiniteScore, InfiniteScore, 1);
-                board.UndoMove(move);
+                // Move ordering with fresh TT data
+                var orderedMoves = legalMoves
+                    .OrderByDescending(m => m == ttEntry.BestMove ? 10_000_000 : MoveOrdering(m, board))
+                    .ThenByDescending(m => m == previousBestMove ? 1 : 0)
+                    .ToList();
 
-                if (score > bestScore || !foundLegalMove)
+                foreach (Move move in orderedMoves)
                 {
-                    bestScore = score;
-                    bestMove = move;
-                    foundLegalMove = true;
-                }
-            }
+                    if (!ConstantDepth && timer.MillisecondsElapsedThisTurn >= maxTimeForTurn)
+                        return EvalLog(bestMove, board, depth);
 
+                    // Immediate checkmate return
+                    if (IsCheckmateMove(move, board))
+                        return EvalLog(move, board, depth);
+
+                    board.MakeMove(move);
+                    int score = -Negamax(board, depth - 1, -beta, -alpha, 1);
+                    board.UndoMove(move);
+
+                    if (score > currentBestScore)
+                    {
+                        currentBestScore = score;
+                        bestMove = move;
+                    }
+
+                    // Alpha-beta updates
+                    if (score >= beta)
+                    {
+                        aspirationFailed = useAspiration;
+                        beta = Math.Min(InfiniteScore, beta + aspirationWindow);
+                        break;
+                    }
+                    alpha = Math.Max(alpha, score);
+                }
+
+                // Aspiration window adjustment
+                if (aspirationFailed && searchCount++ < 1) // Allow only 1 re-search
+                {
+                    aspirationWindow *= 4; // Aggressive window expansion
+                    alpha = currentBestScore - aspirationWindow;
+                    beta = currentBestScore + aspirationWindow;
+                }
+                else
+                {
+                    previousBestScore = currentBestScore;
+                    bestScore = currentBestScore;
+                }
+            } while (aspirationFailed);
+
+            // Store best move for next iteration
             previousBestMove = bestMove;
             depth++;
-            if (!foundLegalMove || depth >= safetymaxdepth) break;
         }
-
-        if (bestMove == Move.NullMove && legalMoves.Length > 0)
-            bestMove = legalMoves[0];
 
         return EvalLog(bestMove, board, depth);
     }

@@ -5,7 +5,7 @@ using System.Linq;
 using System.Numerics;
 
 //My2ndBot v0.6 Bug fixes and experimental features removed draw has to be 0 now!
-public class MyBot : IChessBot
+public class EvilBot : IChessBot
 {
     private const bool ConstantDepth = true;
     private const short MaxDepth = 3;
@@ -17,8 +17,6 @@ public class MyBot : IChessBot
     private const byte LMR_THRESHOLD = 2;
 
     private int positionsSearched = 0;
-    private int ttHits = 0;
-    private int ttCollisions = 0;
     public int bestScore;
 
     private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 };
@@ -28,8 +26,6 @@ public class MyBot : IChessBot
     {
         Move bestMove = Move.NullMove;
         positionsSearched = 0;
-        ttHits = 0;
-        ttCollisions = 0;
         short safetymaxdepth = 150;
         short depth = 1;
 
@@ -173,7 +169,6 @@ public class MyBot : IChessBot
         int index = (int)(key % TT_SIZE);
         if (tt[index].Key == key && tt[index].Depth >= depth)
         {
-            ttHits++;
             if (tt[index].Flag == EXACT) return tt[index].Score;
             if (tt[index].Flag == ALPHA && tt[index].Score <= alpha) return alpha;
             if (tt[index].Flag == BETA && tt[index].Score >= beta) return beta;
@@ -328,7 +323,6 @@ public class MyBot : IChessBot
     private void AddTT(ulong key, int depth, short score, byte flag, Move bestMove)
     {
         int index = (int)(key % TT_SIZE);
-        if (tt[index].Key != key && tt[index].Key != 0) ttCollisions++;
         if (tt[index].Key == 0 || tt[index].Depth <= depth)
             tt[index] = new TTEntry { Key = key, Depth = (short)depth, Score = score, Flag = flag, BestMove = bestMove };
     }

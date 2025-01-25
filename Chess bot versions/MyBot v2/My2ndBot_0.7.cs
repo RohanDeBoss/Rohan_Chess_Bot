@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-//My2ndBot v0.7 Time management, reorganising code, small bug fixes/improvements
+//My2ndBot v0.7.1 Time management, reorganising code, small bug fixes/improvements
 public class MyBot : IChessBot
 {
     // Constants
@@ -89,6 +89,7 @@ public class MyBot : IChessBot
 
             previousBestMove = bestMove;
             depth++;
+            //EvalLog(bestMove, board, depth);
             if (!foundLegalMove || depth >= safetymaxdepth) break;
         }
 
@@ -96,8 +97,8 @@ public class MyBot : IChessBot
             bestMove = legalMoves[0];
 
         return EvalLog(bestMove, board, depth);
+        return bestMove;
     }
-
     private int MoveOrdering(Move move, Board board, int ply = 0)
     {
         ulong key = board.ZobristKey;
