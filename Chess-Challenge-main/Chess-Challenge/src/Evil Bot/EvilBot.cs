@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-//My2ndBot v0.8 Aspiration widows and Linq replacement + History improvements
+//My2ndBot v0.8.1 use null move reduction change over time again
 public class EvilBot : IChessBot
 {
     // Constants
@@ -35,9 +35,9 @@ public class EvilBot : IChessBot
     private Move EvalLog(Move moveToReturn, Board board, int depth)
     {
         Console.WriteLine(" ");
-        Console.WriteLine($"MyBot Depth: {depth - 1}");
-        Console.WriteLine($"MyBot eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
-        Console.WriteLine($"MyBot Positions: {positionsSearched:N0}");
+        Console.WriteLine($"Evil Depth: {depth - 1}");
+        Console.WriteLine($"Evil eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
+        Console.WriteLine($"Evil Positions: {positionsSearched:N0}");
         return moveToReturn;
     }
 
@@ -228,7 +228,7 @@ public class EvilBot : IChessBot
         positionsSearched++;
 
         if (board.IsDraw()) return 0;
-        if (board.IsInCheckmate()) return -InfiniteScore + ply * 50; // Better mate distance
+        if (board.IsInCheckmate()) return -InfiniteScore + ply * 50;
 
         ulong key = board.ZobristKey;
         int index = GetTTIndex(key);
@@ -241,19 +241,28 @@ public class EvilBot : IChessBot
             if (ttEntry.Flag == BETA && ttEntry.Score >= beta) return beta;
         }
 
-        if (depth <= 0) return Quiescence(board, alpha, beta, ply); // Pass current ply
+        if (depth <= 0) return Quiescence(board, alpha, beta, ply);
 
-        // Manual move ordering start
+        // Null Move Pruning (added here)
+        if (!board.IsInCheck() && depth > GetNullMoveReduction(depth, IsEndgame(board)))
+        {
+            board.ForceSkipTurn();
+            int reduction = GetNullMoveReduction(depth, IsEndgame(board));
+            int nullScore = -Negamax(board, depth - reduction - 1, -beta, -beta + 1, ply + 1);
+            board.UndoSkipTurn();
+            if (nullScore >= beta) return beta;
+        }
+
+        // Manual move ordering
         Move[] moves = board.GetLegalMoves();
         int[] moveScores = new int[moves.Length];
 
         for (int i = 0; i < moves.Length; i++)
         {
-            moveScores[i] = MoveOrdering(moves[i], board, ply); // Include ply
+            moveScores[i] = MoveOrdering(moves[i], board, ply);
         }
 
         Array.Sort(moveScores, moves, Comparer<int>.Create((a, b) => b.CompareTo(a)));
-        // Manual move ordering end
 
         int originalAlpha = alpha;
         Move bestMove = Move.NullMove;

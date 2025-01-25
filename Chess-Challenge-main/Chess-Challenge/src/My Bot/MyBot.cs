@@ -3,20 +3,21 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-//My2ndBot v0.8.1 use null move reduction change over time again
+// My2ndBot v0.9 - Matrix Optimized + Other small tweaks
 public class MyBot : IChessBot
 {
     // Constants
     private const bool ConstantDepth = true;
-    private const short MaxDepth = 6;
-    private const short InfiniteScore = 30000; // Less than 32k to fit into short
-    private const int TT_SIZE = 1 << 21; // 2097152 Max size
+    private const short MaxDepth = 15;
+    private const short InfiniteScore = 30000;
+    private const int TT_SIZE = 1 << 22;
     private const short TimeSpentFractionofTotal = 25;
     private const byte LMR_THRESHOLD = 2;
 
     // Static Fields
     private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 };
     private static TTEntry[] tt = new TTEntry[TT_SIZE];
+    private readonly ulong ttMask = (ulong)(TT_SIZE - 1); // Precomputed mask
 
     // Instance Fields
     private int positionsSearched = 0;
@@ -25,17 +26,18 @@ public class MyBot : IChessBot
     private int[,] historyMoves = new int[64, 64];
     private int cachedPieceCount = -1;
     private ulong lastBoardHash;
+    private int currentDepthPositions;
+    private int currentDepth;
 
     private int GetNullMoveReduction(int depth, bool isEndgame)
     {
         return isEndgame ? 3 : 2;
     }
-    private int GetTTIndex(ulong key) => (int)(key & (TT_SIZE - 1));
 
     private Move EvalLog(Move moveToReturn, Board board, int depth)
     {
         Console.WriteLine(" ");
-        Console.WriteLine($"MyBot Depth: {depth - 1}");
+        Console.WriteLine($"MyBot Depth: {depth}");
         Console.WriteLine($"MyBot eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
         Console.WriteLine($"MyBot Positions: {positionsSearched:N0}");
         return moveToReturn;
@@ -45,6 +47,7 @@ public class MyBot : IChessBot
     {
         Move bestMove = Move.NullMove;
         positionsSearched = 0;
+        currentDepth = 0;
         short depth = 1;
         int previousBestScore = 0;
         Move previousBestMove = Move.NullMove;
@@ -67,6 +70,9 @@ public class MyBot : IChessBot
 
         while ((ConstantDepth && depth <= MaxDepth) || (!ConstantDepth && timer.MillisecondsElapsedThisTurn < maxTimeForTurn))
         {
+            currentDepth = depth;
+            currentDepthPositions = 0;
+
             bool useAspiration = depth > MaxAspirationDepth &&
                                 Math.Abs(previousBestScore) < CheckmateScoreThreshold;
 
@@ -83,7 +89,7 @@ public class MyBot : IChessBot
                 int currentBestScore = -InfiniteScore;
                 bestMove = legalMoves[0];
 
-                // Manual move ordering start
+                // Manual move ordering
                 Move[] movesToOrder = legalMoves;
                 int[] moveScores = new int[movesToOrder.Length];
                 TTEntry ttEntry = tt[GetTTIndex(board.ZobristKey)];
@@ -93,30 +99,21 @@ public class MyBot : IChessBot
                     Move move = movesToOrder[i];
                     int score = 0;
 
-                    // Priority 1: TT best move
-                    if (move == ttEntry.BestMove)
-                        score += 10_000_000;
-
-                    // Priority 2: Previous iteration's best move
-                    if (move == previousBestMove)
-                        score += 5_000_000;
-
-                    // Regular move ordering score
+                    if (move == ttEntry.BestMove) score += 10_000_000;
+                    if (move == previousBestMove) score += 5_000_000;
                     score += MoveOrdering(move, board);
                     moveScores[i] = score;
                 }
 
-                // Sort moves by score in descending order
                 Array.Sort(moveScores, movesToOrder, Comparer<int>.Create((a, b) => b.CompareTo(a)));
-                // Manual move ordering end
 
                 foreach (Move move in movesToOrder)
                 {
                     if (!ConstantDepth && timer.MillisecondsElapsedThisTurn >= maxTimeForTurn)
-                        return EvalLog(bestMove, board, depth);
+                        return EvalLog(bestMove, board, currentDepth);
 
                     if (IsCheckmateMove(move, board))
-                        return EvalLog(move, board, depth);
+                        return EvalLog(move, board, currentDepth);
 
                     board.MakeMove(move);
                     int score = -Negamax(board, depth - 1, -beta, -alpha, 1);
@@ -150,11 +147,14 @@ public class MyBot : IChessBot
                 }
             } while (aspirationFailed);
 
+            // Update global counter and log
+            positionsSearched += currentDepthPositions;
+            EvalLog(bestMove, board, currentDepth);
             previousBestMove = bestMove;
             depth++;
         }
 
-        return EvalLog(bestMove, board, depth);
+        return bestMove;
     }
 
     private int MoveOrdering(Move move, Board board, int ply = 0)
@@ -225,7 +225,7 @@ public class MyBot : IChessBot
 
     private int Negamax(Board board, int depth, int alpha, int beta, int ply)
     {
-        positionsSearched++;
+        currentDepthPositions++;
 
         if (board.IsDraw()) return 0;
         if (board.IsInCheckmate()) return -InfiniteScore + ply * 50;
@@ -317,7 +317,7 @@ public class MyBot : IChessBot
 
     private int Quiescence(Board board, int alpha, int beta, int ply)
     {
-        positionsSearched++;
+        currentDepthPositions++;
         int standPat = Evaluate(board, 0);
         if (standPat >= beta) return beta;
         alpha = Math.Max(alpha, standPat);
@@ -348,7 +348,7 @@ public class MyBot : IChessBot
 
     private int Evaluate(Board board, int depth)
     {
-        if (board.IsDraw()) return 0; //Always 0
+        if (board.IsDraw()) return 0;
 
         int score = 0;
         bool isEndgame = IsEndgame(board);
@@ -356,16 +356,35 @@ public class MyBot : IChessBot
         foreach (PieceList pieceList in board.GetAllPieceLists())
         {
             int pieceValue = GetPieceValue(pieceList.TypeOfPieceInList);
-            int[,] adjustmentTable = GetAdjustmentTable(pieceList.TypeOfPieceInList, isEndgame);
+            int[][] adjustmentTable = GetAdjustmentTable(pieceList.TypeOfPieceInList, isEndgame);
+
             foreach (Piece piece in pieceList)
             {
                 int rank = piece.IsWhite ? 7 - piece.Square.Rank : piece.Square.Rank;
-                score += (piece.IsWhite ? 1 : -1) * (adjustmentTable[rank, piece.Square.File] + pieceValue);
+                score += (piece.IsWhite ? 1 : -1) *
+                       (adjustmentTable[rank][piece.Square.File] + pieceValue);
             }
         }
 
         return board.IsWhiteToMove ? score : -score;
     }
+
+    private int[][] GetAdjustmentTable(PieceType pieceType, bool isEndgame)
+    {
+        return pieceType switch
+        {
+            PieceType.Pawn => PawnTable,
+            PieceType.Knight => KnightTable,
+            PieceType.Bishop => BishopTable,
+            PieceType.Rook => RookTable,
+            PieceType.Queen => QueenTable,
+            PieceType.King => isEndgame ? KingEndGame : KingMiddleGame,
+            _ => new int[8][]
+        };
+    }
+
+    private int GetTTIndex(ulong key) => (int)(key & ttMask); // Optimized calculation
+
 
     private bool IsEndgame(Board board)
     {
@@ -397,18 +416,6 @@ public class MyBot : IChessBot
         };
     }
 
-    private int[,] GetAdjustmentTable(PieceType pieceType, bool isEndgame) =>
-        pieceType switch
-        {
-            PieceType.Pawn => PawnTable,
-            PieceType.Knight => KnightTable,
-            PieceType.Bishop => BishopTable,
-            PieceType.Rook => RookTable,
-            PieceType.Queen => QueenTable,
-            PieceType.King => isEndgame ? KingEndGame : KingMiddleGame,
-            _ => new int[8, 8]
-        };
-
     private struct TTEntry
     {
         public ulong Key;
@@ -429,81 +436,81 @@ public class MyBot : IChessBot
             tt[index] = new TTEntry { Key = key, Depth = (short)depth, Score = score, Flag = flag, BestMove = bestMove };
     }
 
-    //Piece square table bitboards
-    private static readonly int[,] PawnTable = {
-        {0,  0,  0,  0,  0,  0,  0,  0},
-        {50, 50, 50, 50, 50, 50, 50, 50},
-        {12, 10, 20, 30, 30, 20, 11, 10},
-        {5,  5, 10, 25, 25, 10,  5,  5},
-        {1,  3 ,  6, 21, 22,  0,  0,  0},
-        {5, -1,-10,  1,  3,-10, -5,  5},
-        {5, 10, 10,-20,-20, 10, 11,  5},
-        {0,  0,  0,  0,  0,  0,  0,  0}
+    // Piece Square Tables (Jagged Arrays)
+    private static readonly int[][] PawnTable = {
+        new[] {0,  0,  0,  0,  0,  0,  0,  0},
+        new[] {50, 50, 50, 50, 50, 50, 50, 50},
+        new[] {12, 10, 20, 30, 30, 20, 11, 10},
+        new[] {5,  5, 10, 25, 25, 10,  5,  5},
+        new[] {1,  3,  6, 21, 22,  0,  0,  0},
+        new[] {5, -1,-10,  1,  3,-10, -5,  5},
+        new[] {5, 10, 10,-20,-20, 10, 11,  5},
+        new[] {0,  0,  0,  0,  0,  0,  0,  0}
     };
 
-    private static readonly int[,] KnightTable = {
-        {-50,-40,-30,-30,-30,-30,-40,-50},
-        {-40,-20,  0,  0,  0,  0,-20,-40},
-        {-30,  0, 10, 15, 15, 10,  0,-30},
-        {-30,  5, 15, 20, 20, 15,  5,-30},
-        {-30,  0, 15, 20, 20, 15,  0,-30},
-        {-30,  5, 10, 15, 15, 10,  5,-30},
-        {-40,-20,  0,  5,  5,  0,-20,-40},
-        {-50,-40,-30,-30,-30,-30,-40,-50}
+    private static readonly int[][] KnightTable = {
+        new[] {-50,-40,-30,-30,-30,-30,-40,-50},
+        new[] {-40,-20,  0,  0,  0,  0,-20,-40},
+        new[] {-30,  0, 10, 15, 15, 10,  0,-30},
+        new[] {-30,  5, 15, 20, 20, 15,  5,-30},
+        new[] {-30,  0, 15, 20, 20, 15,  0,-30},
+        new[] {-30,  5, 10, 15, 15, 10,  5,-30},
+        new[] {-40,-20,  0,  5,  5,  0,-20,-40},
+        new[] {-50,-40,-30,-30,-30,-30,-40,-50}
     };
 
-    private static readonly int[,] BishopTable = {
-        {-20,-10,-10,-10,-10,-10,-10,-20},
-        {-10,  0,  0,  0,  0,  0,  0,-10},
-        {-10,  0,  5, 10, 10,  5,  0,-10},
-        {-10,  5,  5, 10, 10,  5,  5,-10},
-        {-10,  0, 10, 10, 10, 10,  0,-10},
-        {-10, 10, 10, 10, 10, 10, 10,-10},
-        {-10,  5,  0,  0,  0,  0,  5,-10},
-        {-20,-10,-10,-10,-10,-10,-10,-20}
+    private static readonly int[][] BishopTable = {
+        new[] {-20,-10,-10,-10,-10,-10,-10,-20},
+        new[] {-10,  0,  0,  0,  0,  0,  0,-10},
+        new[] {-10,  0,  5, 10, 10,  5,  0,-10},
+        new[] {-10,  5,  5, 10, 10,  5,  5,-10},
+        new[] {-10,  0, 10, 10, 10, 10,  0,-10},
+        new[] {-10, 10, 10, 10, 10, 10, 10,-10},
+        new[] {-10,  5,  0,  0,  0,  0,  5,-10},
+        new[] {-20,-10,-10,-10,-10,-10,-10,-20}
     };
 
-    private static readonly int[,] RookTable = {
-        {0,   0,  0,  0,  0,  0,  0,  0},
-        {0,  10, 10, 10, 10, 10, 10,  5},
-        {-5,  0,  0,  0,  0,  0,  0, -5},
-        {-5,  0,  0,  0,  0,  0,  0, -5},
-        {-5,  0,  0,  0,  0,  0,  0, -5},
-        {-5,  0,  0,  0,  0,  0,  0, -5},
-        {-5,  0,  0,  0,  0,  0,  0, -5},
-        {0,  0,  0,  5,  5,  0,  0,  -4}
+    private static readonly int[][] RookTable = {
+        new[] {0,   0,  0,  0,  0,  0,  0,  0},
+        new[] {0,  10, 10, 10, 10, 10, 10,  5},
+        new[] {-5,  0,  0,  0,  0,  0,  0, -5},
+        new[] {-5,  0,  0,  0,  0,  0,  0, -5},
+        new[] {-5,  0,  0,  0,  0,  0,  0, -5},
+        new[] {-5,  0,  0,  0,  0,  0,  0, -5},
+        new[] {-5,  0,  0,  0,  0,  0,  0, -5},
+        new[] {0,  0,  0,  5,  5,  0,  0,  -4}
     };
 
-    private static readonly int[,] QueenTable = {
-        {-20,-10,-10, -5, -5,-10,-10,-20},
-        {-10,  0,  0,  0,  0,  0,  0,-10},
-        {-10,  0,  5,  5,  5,  5,  0,-10},
-        {-5,  0,  5,  5,  5,  5,  0, -5},
-        {0,  0,  5,  5,  5,  5,  0, -5},
-        {-10,  5,  5,  5,  5,  5,  0,-10},
-        {-10,  0,  5,  0,  0,  0,  0,-10},
-        {-20,-10,-10, -5, -5,-10,-10,-20}
+    private static readonly int[][] QueenTable = {
+        new[] {-20,-10,-10, -5, -5,-10,-10,-20},
+        new[] {-10,  0,  0,  0,  0,  0,  0,-10},
+        new[] {-10,  0,  5,  5,  5,  5,  0,-10},
+        new[] {-5,  0,  5,  5,  5,  5,  0, -5},
+        new[] {0,  0,  5,  5,  5,  5,  0, -5},
+        new[] {-10,  5,  5,  5,  5,  5,  0,-10},
+        new[] {-10,  0,  5,  0,  0,  0,  0,-10},
+        new[] {-20,-10,-10, -5, -5,-10,-10,-20}
     };
 
-    private static readonly int[,] KingMiddleGame = {
-        {-30,-40,-40,-50,-50,-40,-40,-30},
-        {-30,-40,-40,-50,-50,-40,-40,-30},
-        {-30,-40,-40,-50,-50,-40,-40,-30},
-        {-30,-40,-40,-50,-50,-40,-40,-30},
-        {-20,-30,-30,-40,-40,-30,-30,-20},
-        {-10,-20,-20,-20,-20,-20,-20,-10},
-        {20, 20,  0,  0,  0,  0, 20, 20},
-        {20, 30, 10,  0,  0, 10, 30, 20}
+    private static readonly int[][] KingMiddleGame = {
+        new[] {-30,-40,-40,-50,-50,-40,-40,-30},
+        new[] {-30,-40,-40,-50,-50,-40,-40,-30},
+        new[] {-30,-40,-40,-50,-50,-40,-40,-30},
+        new[] {-30,-40,-40,-50,-50,-40,-40,-30},
+        new[] {-20,-30,-30,-40,-40,-30,-30,-20},
+        new[] {-10,-20,-20,-20,-20,-20,-20,-10},
+        new[] {20, 20,  0,  0,  0,  0, 20, 20},
+        new[] {20, 30, 10,  0,  0, 10, 30, 20}
     };
 
-    private static readonly int[,] KingEndGame = {
-        {-50,-40,-30,-20,-20,-30,-40,-50},
-        {-30,-20,-10,  0,  0,-10,-20,-30},
-        {-30,-10, 20, 30, 30, 20,-10,-30},
-        {-30,-10, 30, 40, 40, 30,-10,-30},
-        {-30,-10, 30, 40, 40, 30,-10,-30},
-        {-30,-10, 20, 30, 30, 20,-10,-30},
-        {-30,-30,  0,  0,  0,  0,-30,-30},
-        {-50,-30,-30,-30,-30,-30,-30,-50}
+    private static readonly int[][] KingEndGame = {
+        new[] {-50,-40,-30,-20,-20,-30,-40,-50},
+        new[] {-30,-20,-10,  0,  0,-10,-20,-30},
+        new[] {-30,-10, 20, 30, 30, 20,-10,-30},
+        new[] {-30,-10, 30, 40, 40, 30,-10,-30},
+        new[] {-30,-10, 30, 40, 40, 30,-10,-30},
+        new[] {-30,-10, 20, 30, 30, 20,-10,-30},
+        new[] {-30,-30,  0,  0,  0,  0,-30,-30},
+        new[] {-50,-30,-30,-30,-30,-30,-30,-50}
     };
 }
