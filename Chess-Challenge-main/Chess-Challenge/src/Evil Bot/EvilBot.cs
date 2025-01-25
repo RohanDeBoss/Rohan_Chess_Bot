@@ -8,7 +8,7 @@ public class EvilBot : IChessBot
 {
     // Constants
     private const bool ConstantDepth = true;
-    private const short MaxDepth = 6;
+    private const short MaxDepth = 4;
     private const short InfiniteScore = 30000; // Less than 32k to fit into short
     private const int TT_SIZE = 1 << 21; // 2097152 Max size
     private const short TimeSpentFractionofTotal = 25;

@@ -3,12 +3,12 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// My2ndBot v0.9 - Matrix Optimized + Other small tweaks
+// My2ndBot v1.0 Mate in detection + Periodic decay tweak
 public class MyBot : IChessBot
 {
     // Constants
     private const bool ConstantDepth = true;
-    private const short MaxDepth = 15;
+    private const short MaxDepth = 4;
     private const short InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22;
     private const short TimeSpentFractionofTotal = 25;
@@ -34,12 +34,34 @@ public class MyBot : IChessBot
         return isEndgame ? 3 : 2;
     }
 
+    private string GetMateInMoves(int score)
+    {
+        if (Math.Abs(score) >= InfiniteScore - MaxDepth * 50)
+        {
+            int mateMoves = (InfiniteScore - Math.Abs(score) + 1) / 50;
+            return score > 0 ? $"Mate in {mateMoves}" : $"Mated in {mateMoves} ply!";
+        }
+        return null;
+    }
+
     private Move EvalLog(Move moveToReturn, Board board, int depth)
     {
         Console.WriteLine(" ");
         Console.WriteLine($"MyBot Depth: {depth}");
-        Console.WriteLine($"MyBot eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
+
+        // Check for forced mate and log
+        string mateInfo = GetMateInMoves(bestScore);
+        if (!string.IsNullOrEmpty(mateInfo))
+        {
+            Console.WriteLine(mateInfo);
+        }
+        else
+        {
+            Console.WriteLine($"MyBot eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
+        }
+
         Console.WriteLine($"MyBot Positions: {positionsSearched:N0}");
+
         return moveToReturn;
     }
 
@@ -57,10 +79,15 @@ public class MyBot : IChessBot
         foreach (Move move in legalMoves)
         {
             if (IsCheckmateMove(move, board))
+            {
+                bestScore = InfiniteScore - 50; // Set bestScore for Mate in 1
                 return EvalLog(move, board, 1);
+            }
         }
+
         if (legalMoves.Length == 0) return Move.NullMove;
 
+        // Aspiration search logic
         const int InitialAspirationWindow = 125;
         const int MaxAspirationDepth = 4;
         const int CheckmateScoreThreshold = 25000;
@@ -149,11 +176,10 @@ public class MyBot : IChessBot
 
             // Update global counter and log
             positionsSearched += currentDepthPositions;
-            EvalLog(bestMove, board, currentDepth);
             previousBestMove = bestMove;
             depth++;
         }
-
+        return EvalLog(bestMove, board, currentDepth);
         return bestMove;
     }
 
@@ -205,7 +231,7 @@ public class MyBot : IChessBot
         historyMoves[move.StartSquare.Index, move.TargetSquare.Index] += depth * depth;
 
         // Periodic decay (now in separate method)
-        if (positionsSearched % 512 == 0)
+        if (positionsSearched % 1024 == 0)
             DecayHistory();
     }
     private void DecayHistory()
@@ -278,7 +304,7 @@ public class MyBot : IChessBot
                 newDepth -= 1;
 
             int score;
-            if (i == 0) // PV node
+            if (i == 0)  // PV node (principal variation)
             {
                 score = -Negamax(board, newDepth, -beta, -alpha, ply + 1);
             }
@@ -291,6 +317,7 @@ public class MyBot : IChessBot
 
             board.UndoMove(move);
 
+            // Update best move and score if necessary
             if (score > bestScore)
             {
                 bestScore = score;
@@ -298,15 +325,18 @@ public class MyBot : IChessBot
             }
 
             alpha = Math.Max(alpha, score);
+
+            // Pruning
             if (alpha >= beta)
             {
                 if (!move.IsCapture)
                 {
-                    if (i < 2) UpdateKillerMoves(move, ply);
-                    UpdateHistoryMove(move, depth); // Restored history update call
+                    if (i < 2) UpdateKillerMoves(move, ply);  // Update killer moves for early moves
+                    UpdateHistoryMove(move, depth);  // Update history table
                 }
-                AddTT(key, depth, (short)beta, BETA, move);
-                return beta;
+
+                AddTT(key, depth, (short)beta, BETA, move);  // Store the result in transposition table
+                return beta;  // Beta cutoff
             }
         }
 
@@ -384,7 +414,6 @@ public class MyBot : IChessBot
     }
 
     private int GetTTIndex(ulong key) => (int)(key & ttMask); // Optimized calculation
-
 
     private bool IsEndgame(Board board)
     {
