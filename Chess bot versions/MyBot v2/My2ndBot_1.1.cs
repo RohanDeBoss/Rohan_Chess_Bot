@@ -14,7 +14,7 @@ public class MyBot : IChessBot
 
     // Static Fields
     private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 };
-    private static TTEntry[] tt = new TTEntry[TT_SIZE];
+    private TTEntry[] tt = new TTEntry[TT_SIZE]; // Remove 'static'
     private readonly ulong ttMask = (ulong)(TT_SIZE - 1); // Precomputed mask
 
     // Instance Fields

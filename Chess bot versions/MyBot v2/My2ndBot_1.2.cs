@@ -61,7 +61,8 @@ public class MyBot : IChessBot
             : $"MyBot eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
 
         // Log node statistics
-        Console.WriteLine($"Nodes - Negamax: {negamaxPositions:N0}, QSearch: {qsearchPositions:N0}, Total: {negamaxPositions + qsearchPositions:N0}");
+        //Console.WriteLine($"MyBot: Negamax: {negamaxPositions:N0}, QSearch: {qsearchPositions:N0}");
+        Console.WriteLine($"MyBot Total: {negamaxPositions + qsearchPositions:N0}");
 
         return moveToReturn;
     }

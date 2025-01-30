@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// My2ndBot v1.2 More Logging detais + Bug Fixes
+// My2ndBot v1.2 More Logging detais + Bug Fixes + Small optimisations + Code Optimisations
 public class EvilBot : IChessBot
 {
     // Constants
@@ -51,78 +51,70 @@ public class EvilBot : IChessBot
 
     private Move EvalLog(Move moveToReturn, Board board, int depth)
     {
-        Console.WriteLine(" ");
+        Console.WriteLine();
         Console.WriteLine($"Evil Depth: {depth}");
 
+        // Log evaluation or mate information
         string mateInfo = GetMateInMoves(bestScore);
-        if (!string.IsNullOrEmpty(mateInfo))
-        {
-            Console.WriteLine(mateInfo);
-        }
-        else
-        {
-            Console.WriteLine($"Evil eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
-        }
+        Console.WriteLine(!string.IsNullOrEmpty(mateInfo)
+            ? mateInfo
+            : $"Evil eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
 
-        // New: Log positions separately
-        Console.WriteLine($"Evil Negamax nodes: {negamaxPositions:N0}");
-        Console.WriteLine($"Evil QSearch nodes: {qsearchPositions:N0}");
-        Console.WriteLine($"Evil Total nodes: {negamaxPositions + qsearchPositions:N0}");
+        // Log node statistics
+        //Console.WriteLine($"MyBot: Negamax: {negamaxPositions:N0}, QSearch: {qsearchPositions:N0}");
+        Console.WriteLine($"Evil Total: {negamaxPositions + qsearchPositions:N0}");
 
         return moveToReturn;
     }
 
     public Move Think(Board board, Timer timer)
     {
-        // Reset between moves
+        // Reset state between moves
         Array.Clear(killerMoves, 0, killerMoves.Length); // Clear killer moves
         Array.Clear(historyMoves, 0, historyMoves.Length); // Reset history table
         negamaxPositions = 0;
         qsearchPositions = 0;
         currentDepth = 0;
+
         short depth = 1;
         int previousBestScore = 0;
         Move previousBestMove = Move.NullMove;
         var legalMoves = board.GetLegalMoves();
-        Move bestMove = legalMoves.Length > 0 ? legalMoves[0] : Move.NullMove; // Initialize bestMove with a valid move
+        Move bestMove = legalMoves.Length > 0 ? legalMoves[0] : Move.NullMove; // Initialize with a valid move
 
         // Immediate checkmate check
         foreach (Move move in legalMoves)
         {
             if (IsCheckmateMove(move, board))
             {
-                bestScore = InfiniteScore - 50; // Set bestScore for Mate in 1
+                bestScore = InfiniteScore - 50; // Mate in 1
                 return EvalLog(move, board, 1);
             }
         }
 
-        if (legalMoves.Length == 0) return legalMoves[0];
+        // Return if no legal moves
+        if (legalMoves.Length == 0) return Move.NullMove;
 
-        // Aspiration search logic
+        // Aspiration search constants
         const int InitialAspirationWindow = 125;
         const int MaxAspirationDepth = 4;
         const int CheckmateScoreThreshold = 25000;
 
-        // Calculate time fraction dynamically
+        // Allocate time for the move
         short timeFraction = GetTimeSpentFraction(timer);
-
-        // Use the fraction to allocate time for this move
         int maxTimeForTurn = ConstantDepth ? int.MaxValue :
             (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 3);
 
+        // Iterative deepening loop
         while ((ConstantDepth && depth <= MaxDepth) || (!ConstantDepth && timer.MillisecondsElapsedThisTurn < maxTimeForTurn))
         {
             currentDepth = depth;
-
-            bool useAspiration = depth > MaxAspirationDepth &&
-                                Math.Abs(previousBestScore) < CheckmateScoreThreshold;
+            bool useAspiration = depth > MaxAspirationDepth && Math.Abs(previousBestScore) < CheckmateScoreThreshold;
 
             int alpha = -InfiniteScore;
             int beta = InfiniteScore;
             int aspirationWindow = InitialAspirationWindow;
-
             bool aspirationFailed;
-            int searchCount = 0;
 
             do
             {
@@ -146,12 +138,12 @@ public class EvilBot : IChessBot
                     moveScores[i] = score;
                 }
 
-                Array.Sort(moveScores, movesToOrder, Comparer<int>.Create((a, b) => b.CompareTo(a)));
+                Array.Sort(moveScores, movesToOrder, Comparer<int>.Create((a, b) => b.CompareTo(a))); // Descending order
 
                 foreach (Move move in movesToOrder)
                 {
                     if (!ConstantDepth && timer.MillisecondsElapsedThisTurn >= maxTimeForTurn)
-                        return EvalLog(bestMove, board, currentDepth); // Now returns a valid move
+                        return EvalLog(bestMove, board, currentDepth); // Return current best move
 
                     if (IsCheckmateMove(move, board))
                         return EvalLog(move, board, currentDepth);
@@ -175,7 +167,7 @@ public class EvilBot : IChessBot
                     alpha = Math.Max(alpha, score);
                 }
 
-                if (aspirationFailed && searchCount++ < 1)
+                if (aspirationFailed)
                 {
                     aspirationWindow *= 4;
                     alpha = currentBestScore - aspirationWindow;
@@ -192,6 +184,7 @@ public class EvilBot : IChessBot
             previousBestMove = bestMove;
             depth++;
         }
+
         return EvalLog(bestMove, board, currentDepth);
     }
 
@@ -394,14 +387,15 @@ public class EvilBot : IChessBot
 
         foreach (PieceList pieceList in board.GetAllPieceLists())
         {
-            int pieceValue = GetPieceValue(pieceList.TypeOfPieceInList);
-            int[][] adjustmentTable = GetAdjustmentTable(pieceList.TypeOfPieceInList, isEndgame);
+            var pieceType = pieceList.TypeOfPieceInList;
+            int pieceValue = GetPieceValue(pieceType);
+            int[][] adjustmentTable = GetAdjustmentTable(pieceType, isEndgame);
 
             foreach (Piece piece in pieceList)
             {
                 int rank = piece.IsWhite ? 7 - piece.Square.Rank : piece.Square.Rank;
-                score += (piece.IsWhite ? 1 : -1) *
-                       (adjustmentTable[rank][piece.Square.File] + pieceValue);
+                int adjustment = adjustmentTable[rank][piece.Square.File];
+                score += (piece.IsWhite ? 1 : -1) * (pieceValue + adjustment);
             }
         }
 
