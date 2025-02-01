@@ -8,7 +8,7 @@ public class MyBot : IChessBot
 {
     // Constants
     private const bool ConstantDepth = false;
-    private const short MaxDepth = 2;
+    private const short MaxDepth = 4;
     private const short InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22;
 
