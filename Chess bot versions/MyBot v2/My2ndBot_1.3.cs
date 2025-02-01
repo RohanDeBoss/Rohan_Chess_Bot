@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Numerics;
 
 // My2ndBot v1.3 Smoothed and nerfed LMR and NMP, debugging + optimisations!
+
 public class MyBot : IChessBot
 {
     // Constants
@@ -84,6 +85,22 @@ public class MyBot : IChessBot
         var legalMoves = board.GetLegalMoves();
         Move bestMove = legalMoves.Length > 0 ? legalMoves[0] : Move.NullMove; // Initialize with a valid move
 
+        // Handle no legal moves first
+        if (legalMoves.Length == 0)
+        {
+            bestScore = board.IsInCheck() ? -InfiniteScore + 50 : 0; // Either checkmate or stalemate
+            return Move.NullMove;
+        }
+
+        // Handle single legal move
+        if (legalMoves.Length == 1)
+        {
+            board.MakeMove(legalMoves[0]);
+            bestScore = -Evaluate(board, 0); // Get actual position evaluation
+            board.UndoMove(legalMoves[0]);
+            return EvalLog(legalMoves[0], board, 1);
+        }
+
         // Immediate checkmate check
         foreach (Move move in legalMoves)
         {
@@ -93,9 +110,6 @@ public class MyBot : IChessBot
                 return EvalLog(move, board, 1);
             }
         }
-
-        // Return if no legal moves
-        if (legalMoves.Length == 0) return Move.NullMove;
 
         // Aspiration search constants
         const int InitialAspirationWindow = 125;
@@ -147,9 +161,6 @@ public class MyBot : IChessBot
                     if (!ConstantDepth && timer.MillisecondsElapsedThisTurn >= maxTimeForTurn)
                         return EvalLog(bestMove, board, currentDepth); // Return current best move
 
-                    if (IsCheckmateMove(move, board))
-                        return EvalLog(move, board, currentDepth);
-
                     board.MakeMove(move);
                     int score = -Negamax(board, depth - 1, -beta, -alpha, 1);
                     board.UndoMove(move);
@@ -185,7 +196,6 @@ public class MyBot : IChessBot
             // Update best move and increment depth
             previousBestMove = bestMove;
             depth++;
-            //EvalLog(bestMove, board, currentDepth);
         }
 
         return EvalLog(bestMove, board, currentDepth);
