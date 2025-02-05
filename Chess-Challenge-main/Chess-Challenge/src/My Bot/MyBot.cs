@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using System;
 
-// My2ndBot v1.5 Time management improvements + Bugfixing :)
+// My2ndBot v1.5.1 History decay changes + mate in "" fix
 public class MyBot : IChessBot
 {
     // Constants
@@ -43,7 +43,8 @@ public class MyBot : IChessBot
 
     private string GetMateInMoves(int score)
     {
-        if (Math.Abs(score) >= InfiniteScore - MaxDepth * 50)
+        // Changed the condition to use a fixed threshold of 1500 instead of MaxDepth * 50
+        if (Math.Abs(score) >= InfiniteScore - 1500)
         {
             int mateMoves = (InfiniteScore - Math.Abs(score) + 1) / 50;
             return score > 0 ? $"Mate in {mateMoves} ply! :)" : $"Mated in {mateMoves} ply :(";
@@ -219,15 +220,15 @@ public class MyBot : IChessBot
         if (move.CapturePieceType != PieceType.None) return;
         historyMoves[move.StartSquare.Index, move.TargetSquare.Index] += depth * depth;
 
-        // Decay history every 1024 nodes to prevent overflow
-        if ((negamaxPositions + qsearchPositions) % 1024 == 0)
+        // Decay history every 512 nodes to prevent overflow
+        if ((negamaxPositions + qsearchPositions) % 512 == 0)
             DecayHistory(); // Already implemented
     }
     private void DecayHistory()
     {
         for (int i = 0; i < 64; i++)
             for (int j = 0; j < 64; j++)
-                historyMoves[i, j] = (historyMoves[i, j] * 3) / 4;
+                historyMoves[i, j] = (historyMoves[i, j] * 4) / 5;
     }
 
     private bool IsCheckmateMove(Move move, Board board)
