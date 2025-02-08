@@ -3,12 +3,12 @@ using System.Collections.Generic;
 using System.Numerics;
 using System;
 
-// My2ndBot v1.5 Time management improvements :)
+// My2ndBot v1.6 Bugfixes to killermoves
 public class EvilBot : IChessBot
 {
     // Constants
     private const bool ConstantDepth = false;
-    private const short MaxDepth = 1;
+    private const short MaxDepth = 2;
     private const short InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22;
 
@@ -17,13 +17,13 @@ public class EvilBot : IChessBot
     private TTEntry[] tt = new TTEntry[TT_SIZE]; // Remove 'static'
     private readonly ulong ttMask = (ulong)(TT_SIZE - 1); // Precomputed mask
 
-    private int GetTTIndex(ulong key) => (int)(key & (TT_SIZE - 1));
+    private int GetTTIndex(ulong key) => (int)(key & ttMask); //Using tt mask
 
     // Instance Fields
     private int negamaxPositions = 0;
     private int qsearchPositions = 0;
-    public int bestScore;
-    private Move[] killerMoves = new Move[100 * 2];
+    private int bestScore;
+    private List<Move> killerMoves = new List<Move>(); //Killer moves now a list
     private int[,] historyMoves = new int[64, 64];
     private int cachedPieceCount = -1;
     private ulong lastBoardHash;
@@ -43,7 +43,8 @@ public class EvilBot : IChessBot
 
     private string GetMateInMoves(int score)
     {
-        if (Math.Abs(score) >= InfiniteScore - MaxDepth * 50)
+        // Changed the condition to use a fixed threshold of 1500 instead of MaxDepth * 50
+        if (Math.Abs(score) >= InfiniteScore - 1500)
         {
             int mateMoves = (InfiniteScore - Math.Abs(score) + 1) / 50;
             return score > 0 ? $"Mate in {mateMoves} ply! :)" : $"Mated in {mateMoves} ply :(";
@@ -72,7 +73,7 @@ public class EvilBot : IChessBot
     public Move Think(Board board, Timer timer)
     {
         // Reset state between moves
-        Array.Clear(killerMoves, 0, killerMoves.Length); // Clear killer moves
+        killerMoves.Clear();
         Array.Clear(historyMoves, 0, historyMoves.Length); // Reset history table
         negamaxPositions = 0;
         qsearchPositions = 0;
@@ -200,15 +201,27 @@ public class EvilBot : IChessBot
         return EvalLog(bestMove, board, currentDepth);
     }
 
+    // Since we store two moves per ply, we need (ply * 2) + 2 elements.
+    private void EnsureKillerMovesSize(int ply)
+    {
+        int requiredSize = (ply * 2) + 2;
+        while (killerMoves.Count < requiredSize)
+        {
+            killerMoves.Add(Move.NullMove);
+        }
+    }
+
     private void UpdateKillerMoves(Move move, int ply)
     {
         if (move.CapturePieceType != PieceType.None) return;
 
-        // Wrap the ply within the bounds of the killer moves array.
-        int killerIndex = (ply % 100) * 2;
+        // Make sure we have enough elements for this ply.
+        EnsureKillerMovesSize(ply);
 
+        int killerIndex = ply * 2; // Use ply * 2 directly, without wrapping.
         if (move != killerMoves[killerIndex])
         {
+            // Shift the current killer move to the second slot and insert the new move.
             killerMoves[killerIndex + 1] = killerMoves[killerIndex];
             killerMoves[killerIndex] = move;
         }
@@ -219,15 +232,15 @@ public class EvilBot : IChessBot
         if (move.CapturePieceType != PieceType.None) return;
         historyMoves[move.StartSquare.Index, move.TargetSquare.Index] += depth * depth;
 
-        // Decay history every 1024 nodes to prevent overflow
-        if ((negamaxPositions + qsearchPositions) % 1024 == 0)
+        // Decay history every 512 nodes to prevent overflow
+        if ((negamaxPositions + qsearchPositions) % 512 == 0)
             DecayHistory(); // Already implemented
     }
     private void DecayHistory()
     {
         for (int i = 0; i < 64; i++)
             for (int j = 0; j < 64; j++)
-                historyMoves[i, j] = (historyMoves[i, j] * 3) / 4;
+                historyMoves[i, j] = (historyMoves[i, j] * 4) / 5;
     }
 
     private bool IsCheckmateMove(Move move, Board board)
@@ -259,9 +272,13 @@ public class EvilBot : IChessBot
         if (move.IsPromotion)
             score += 80000 + GetPieceValue(move.PromotionPieceType);
 
-        // Killer move bonus
-        if (move == killerMoves[ply * 2] || move == killerMoves[ply * 2 + 1])
+        int killerIndex0 = ply * 2;
+        int killerIndex1 = ply * 2 + 1;
+        if ((killerMoves.Count > killerIndex0 && move == killerMoves[killerIndex0]) ||
+            (killerMoves.Count > killerIndex1 && move == killerMoves[killerIndex1]))
+        {
             score += 90000; // Adjust this bonus as needed
+        }
 
         return score;
     }

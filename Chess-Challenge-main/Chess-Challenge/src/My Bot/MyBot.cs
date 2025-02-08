@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using System;
 
-// My2ndBot v1.5.1 History decay changes + mate in "" fix
+// My2ndBot v1.6 Bugfixes to killermoves
 public class MyBot : IChessBot
 {
     // Constants
@@ -17,13 +17,13 @@ public class MyBot : IChessBot
     private TTEntry[] tt = new TTEntry[TT_SIZE]; // Remove 'static'
     private readonly ulong ttMask = (ulong)(TT_SIZE - 1); // Precomputed mask
 
-    private int GetTTIndex(ulong key) => (int)(key & (TT_SIZE - 1));
+    private int GetTTIndex(ulong key) => (int)(key & ttMask); //Using tt mask
 
     // Instance Fields
     private int negamaxPositions = 0;
     private int qsearchPositions = 0;
-    public int bestScore;
-    private Move[] killerMoves = new Move[100 * 2];
+    private int bestScore;
+    private List<Move> killerMoves = new List<Move>(); //Killer moves now a list
     private int[,] historyMoves = new int[64, 64];
     private int cachedPieceCount = -1;
     private ulong lastBoardHash;
@@ -73,7 +73,7 @@ public class MyBot : IChessBot
     public Move Think(Board board, Timer timer)
     {
         // Reset state between moves
-        Array.Clear(killerMoves, 0, killerMoves.Length); // Clear killer moves
+        killerMoves.Clear();
         Array.Clear(historyMoves, 0, historyMoves.Length); // Reset history table
         negamaxPositions = 0;
         qsearchPositions = 0;
@@ -118,8 +118,9 @@ public class MyBot : IChessBot
 
         const int SafetyMargin = 10;  // Reserve a small buffer to prevent time overrun
         short timeFraction = Math.Max(GetTimeSpentFraction(timer), (short)1);  // Ensure at least 1 to prevent division by zero
+                                                                               // Calculate maxTimeForTurn with a minimum of 1 millisecond
         int maxTimeForTurn = ConstantDepth ? int.MaxValue :
-            (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 3) - SafetyMargin;
+            Math.Max(1, (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 3) - SafetyMargin);
 
         // Iterative deepening loop
         while ((ConstantDepth && depth <= MaxDepth) || (!ConstantDepth && timer.MillisecondsElapsedThisTurn < maxTimeForTurn))
@@ -201,15 +202,27 @@ public class MyBot : IChessBot
         return EvalLog(bestMove, board, currentDepth);
     }
 
+    // Since we store two moves per ply, we need (ply * 2) + 2 elements.
+    private void EnsureKillerMovesSize(int ply)
+    {
+        int requiredSize = (ply * 2) + 2;
+        while (killerMoves.Count < requiredSize)
+        {
+            killerMoves.Add(Move.NullMove);
+        }
+    }
+
     private void UpdateKillerMoves(Move move, int ply)
     {
         if (move.CapturePieceType != PieceType.None) return;
 
-        // Wrap the ply within the bounds of the killer moves array.
-        int killerIndex = (ply % 100) * 2;
+        // Make sure we have enough elements for this ply.
+        EnsureKillerMovesSize(ply);
 
+        int killerIndex = ply * 2; // Use ply * 2 directly, without wrapping.
         if (move != killerMoves[killerIndex])
         {
+            // Shift the current killer move to the second slot and insert the new move.
             killerMoves[killerIndex + 1] = killerMoves[killerIndex];
             killerMoves[killerIndex] = move;
         }
@@ -260,9 +273,13 @@ public class MyBot : IChessBot
         if (move.IsPromotion)
             score += 80000 + GetPieceValue(move.PromotionPieceType);
 
-        // Killer move bonus
-        if (move == killerMoves[ply * 2] || move == killerMoves[ply * 2 + 1])
+        int killerIndex0 = ply * 2;
+        int killerIndex1 = ply * 2 + 1;
+        if ((killerMoves.Count > killerIndex0 && move == killerMoves[killerIndex0]) ||
+            (killerMoves.Count > killerIndex1 && move == killerMoves[killerIndex1]))
+        {
             score += 90000; // Adjust this bonus as needed
+        }
 
         return score;
     }
