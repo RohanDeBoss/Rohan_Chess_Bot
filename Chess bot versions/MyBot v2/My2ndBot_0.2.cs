@@ -2,7 +2,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Net.NetworkInformation;
 using System.Numerics;
 
 //My2ndBot v0.2 TT Added so a lot faster + bot is now stronger!

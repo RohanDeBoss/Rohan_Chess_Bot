@@ -10,7 +10,6 @@ public class MyBot : IChessBot
     private const int MaxDepth = 3;
     private const int QuiescenceDepthLimit = 5; // Adjust this value as needed
 
-
     private const int InfiniteScore = 1000000;
     private int positionsSearched = 0;
 

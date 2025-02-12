@@ -3,12 +3,12 @@ using System.Collections.Generic;
 using System.Numerics;
 using System;
 
-// My2ndBot v1.6 Bugfixes to killermoves
+// My2ndBot v1.6.1 Bugfixes to killermoves + small other fixes
 public class EvilBot : IChessBot
 {
     // Constants
     private const bool ConstantDepth = false;
-    private const short MaxDepth = 2;
+    private const short MaxDepth = 6;
     private const short InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22;
 
@@ -64,7 +64,7 @@ public class EvilBot : IChessBot
             : $"Evil eval: {bestScore * (board.IsWhiteToMove ? 1 : -1)}");
 
         // Log node statistics
-        //Console.WriteLine($"Evil Negamax: {negamaxPositions:N0}, QSearch: {qsearchPositions:N0}");
+        //Console.WriteLine($"MyBot Negamax: {negamaxPositions:N0}, QSearch: {qsearchPositions:N0}");
         Console.WriteLine($"Evil Total: {negamaxPositions + qsearchPositions:N0}");
 
         return moveToReturn;
@@ -119,10 +119,10 @@ public class EvilBot : IChessBot
         const int SafetyMargin = 10;  // Reserve a small buffer to prevent time overrun
         short timeFraction = Math.Max(GetTimeSpentFraction(timer), (short)1);  // Ensure at least 1 to prevent division by zero
         int maxTimeForTurn = ConstantDepth ? int.MaxValue :
-            (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 3) - SafetyMargin;
+            (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 3);
 
         // Iterative deepening loop
-        while ((ConstantDepth && depth <= MaxDepth) || (!ConstantDepth && timer.MillisecondsElapsedThisTurn < maxTimeForTurn))
+        while ((ConstantDepth && depth <= MaxDepth) || (!ConstantDepth && timer.MillisecondsElapsedThisTurn - SafetyMargin < maxTimeForTurn))
         {
             currentDepth = depth;
             bool useAspiration = depth > MaxAspirationDepth && Math.Abs(previousBestScore) < CheckmateScoreThreshold;
