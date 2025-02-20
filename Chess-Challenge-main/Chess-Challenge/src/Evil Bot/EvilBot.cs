@@ -8,7 +8,7 @@ public class EvilBot : IChessBot
 {
     // Constants
     private const bool ConstantDepth = false;
-    private const short MaxDepth = 6;
+    private const short MaxDepth = 7;
     private const short InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22;
 
@@ -64,7 +64,7 @@ public class EvilBot : IChessBot
             : $"Evil eval: {bestScore * (board.IsWhiteToMove ? 1 : -1)}");
 
         // Log node statistics
-        //Console.WriteLine($"MyBot Negamax: {negamaxPositions:N0}, QSearch: {qsearchPositions:N0}");
+        Console.WriteLine($"Evil Negamax: {negamaxPositions:N0}, QSearch: {qsearchPositions:N0}");
         Console.WriteLine($"Evil Total: {negamaxPositions + qsearchPositions:N0}");
 
         return moveToReturn;
