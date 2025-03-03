@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using System;
 
-// My2ndBot v1.6 Bugfixes to killermoves + small fixed
+// My2ndBot v1.6.2 Debugging Updates/fixes
 public class MyBot : IChessBot
 {
     // Constants
@@ -43,32 +43,42 @@ public class MyBot : IChessBot
 
     private string GetMateInMoves(int score)
     {
-        // Changed the condition to use a fixed threshold of 1500 instead of MaxDepth * 50
-        if (Math.Abs(score) >= InfiniteScore - 1500)
+        int mateMoves = (InfiniteScore - Math.Abs(score) + 1) / 50;
+        // Only report a mate if the mate distance is within the current search depth
+        if (Math.Abs(score) >= InfiniteScore - 1500 && mateMoves <= currentDepth)
         {
-            int mateMoves = (InfiniteScore - Math.Abs(score) + 1) / 50;
             return score > 0 ? $"Mate in {mateMoves} ply! :)" : $"Mated in {mateMoves} ply :(";
         }
         return null;
     }
 
-    private Move EvalLog(Move moveToReturn, Board board, int depth)
+
+    private Move EvalLog(Move moveToReturn, Board board, int depth, bool forced = false)
     {
+
         Console.WriteLine();
+
+        if (forced)
+        {
+            Console.WriteLine("I must play a FORCED MOVE!");
+            return moveToReturn;
+        }
+
         Console.WriteLine($"MyBot Depth: {depth}");
 
         // Log evaluation or mate information
         string mateInfo = GetMateInMoves(bestScore);
         Console.WriteLine(!string.IsNullOrEmpty(mateInfo)
             ? mateInfo
-            : $"MyBot eval: {bestScore * (board.IsWhiteToMove ? 1 : -1)}");
+            : $"No forced mate found");
 
-        // Log node statistics
+        Console.WriteLine($"MyBot eval: {bestScore * (board.IsWhiteToMove ? 1 : -1)}");
         //Console.WriteLine($"MyBot Negamax: {negamaxPositions:N0}, QSearch: {qsearchPositions:N0}");
         Console.WriteLine($"MyBot Total: {negamaxPositions + qsearchPositions:N0}");
 
         return moveToReturn;
     }
+
 
     public Move Think(Board board, Timer timer)
     {
@@ -98,7 +108,7 @@ public class MyBot : IChessBot
             board.MakeMove(legalMoves[0]);
             bestScore = -Evaluate(board);
             board.UndoMove(legalMoves[0]);
-            return EvalLog(legalMoves[0], board, 0);  // ✅ Correct depth
+            return EvalLog(legalMoves[0], board, 0, true);  // Only prints "Forced move"
         }
 
         // Immediate checkmate check
@@ -107,7 +117,8 @@ public class MyBot : IChessBot
             if (IsCheckmateMove(move, board))
             {
                 bestScore = InfiniteScore - 50;
-                return EvalLog(move, board, 0);  // ✅ Correct depth
+                currentDepth = 1;  // Set debug depth to 1 for correct mate reporting
+                return EvalLog(move, board, 1);  // Pass depth 1 so mate in 1 is shown
             }
         }
 
@@ -236,6 +247,7 @@ public class MyBot : IChessBot
         if ((negamaxPositions + qsearchPositions) % 512 == 0)
             DecayHistory(); // Already implemented
     }
+
     private void DecayHistory()
     {
         for (int i = 0; i < 64; i++)
