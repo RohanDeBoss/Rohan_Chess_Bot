@@ -9,6 +9,7 @@ public class MyBot : IChessBot
     // Constants
     private const bool ConstantDepth = false;
     private const short MaxDepth = 6; // Only does anything when Constant depth is true
+    private const short MaxSafetyDepth = 99; // New absolute maximum safety depth
     private const short InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22;
 
@@ -131,7 +132,7 @@ public class MyBot : IChessBot
             return HandleForcedMove(legalMoves[0], board, 1, true);
         }
 
-        // Immediate checkmate check with early exit
+        // Immediate checkmate check
         foreach (Move move in legalMoves)
         {
             if (IsCheckmateMove(move, board))
@@ -151,8 +152,10 @@ public class MyBot : IChessBot
             ? int.MaxValue
             : (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 3);
 
-        // Iterative deepening loop
-        while ((ConstantDepth && depth <= MaxDepth) || (!ConstantDepth && timer.MillisecondsElapsedThisTurn - SafetyMargin < maxTimeForTurn))
+        // Iterative deepening loop with MaxSafetyDepth cap
+        while (depth <= MaxSafetyDepth &&
+               (ConstantDepth && depth <= MaxDepth ||
+                !ConstantDepth && timer.MillisecondsElapsedThisTurn - SafetyMargin < maxTimeForTurn))
         {
             currentDepth = depth;
             bool useAspiration = depth > MaxAspirationDepth && Math.Abs(previousBestScore) < CheckmateScoreThreshold;
@@ -181,13 +184,6 @@ public class MyBot : IChessBot
                     board.MakeMove(move);
                     int score = -Negamax(board, depth - 1, -beta, -alpha, 1);
                     board.UndoMove(move);
-
-                    // Early exit if mate-in-one is found after depth 1
-                    if (depth > 1 && Math.Abs(score) >= InfiniteScore - 50)
-                    {
-                        LogEval(board, currentDepth, false);
-                        return move;
-                    }
 
                     if (score > currentBestScore)
                     {
