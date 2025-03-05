@@ -8,7 +8,7 @@ public class MyBot : IChessBot
 {
     // Constants
     private const bool ConstantDepth = false;
-    private const short MaxDepth = 10;
+    private const short MaxDepth = 6; // Only does anything when Constant depth is true
     private const short InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22;
 
@@ -23,7 +23,7 @@ public class MyBot : IChessBot
     private int negamaxPositions = 0;
     private int qsearchPositions = 0;
     private int bestScore;
-    private List<Move> killerMoves = new List<Move>(); // Killer moves is now a list
+    private List<Move> killerMoves = new List<Move>();
     private int[,] historyMoves = new int[64, 64];
     private int cachedPieceCount = -1;
     private ulong lastBoardHash;
@@ -37,14 +37,10 @@ public class MyBot : IChessBot
 
     private short GetTimeSpentFraction(Timer timer)
     {
-        if (timer.MillisecondsRemaining <= 5_000)       // ≤ 5 seconds
-            return 40; // Use 1/40 of remaining time
-        else if (timer.MillisecondsRemaining < 20_000)   // < 20 seconds
-            return 30; // Use 1/30 of remaining time
-        else if (timer.MillisecondsRemaining > 60_000)   // > 1 minute
-            return 22; // Use 1/22 of remaining time
-        else
-            return 25; // Default to 1/25 of remaining time
+        if (timer.MillisecondsRemaining <= 5_000) return 40;
+        else if (timer.MillisecondsRemaining < 20_000) return 30;
+        else if (timer.MillisecondsRemaining > 60_000) return 22;
+        else return 25;
     }
 
     private string? GetMateInMoves(int score)
@@ -59,18 +55,15 @@ public class MyBot : IChessBot
         return null;
     }
 
-
-    private Move EvalLog(Move moveToReturn, Board board, int depth, bool isForcedMove)
+    private void LogEval(Board board, int depth, bool isForcedMove)
     {
         if (isForcedMove)
         {
-            // Print exactly one empty line followed by the forced move message
-            Console.WriteLine(); // Empty line
+            Console.WriteLine();
             Console.WriteLine($"{GetType().Name}: I must play a FORCED MOVE!");
         }
         else
         {
-            // Normal logging: print a blank line followed by debug info
             Console.WriteLine();
             DebugLog($"Depth: {depth}");
             string mateInfo = GetMateInMoves(bestScore) ?? string.Empty;
@@ -78,7 +71,6 @@ public class MyBot : IChessBot
             DebugLog($"Eval: {bestScore * (board.IsWhiteToMove ? 1 : -1)}");
             DebugLog($"Total: {negamaxPositions + qsearchPositions:N0}");
         }
-        return moveToReturn;
     }
 
     private Move[] OrderMoves(Move[] moves, Board board, int ply, Move? previousBestMove = null)
@@ -107,8 +99,8 @@ public class MyBot : IChessBot
         bestScore = overrideScore ?? -Evaluate(board);
         board.UndoMove(move);
         currentDepth = forcedDepth;
-
-        return EvalLog(move, board, forcedDepth, isForcedMove);
+        LogEval(board, forcedDepth, isForcedMove);
+        return move;
     }
 
     public Move Think(Board board, Timer timer)
@@ -139,7 +131,7 @@ public class MyBot : IChessBot
             return HandleForcedMove(legalMoves[0], board, 1, true);
         }
 
-        // Immediate checkmate check
+        // Immediate checkmate check with early exit
         foreach (Move move in legalMoves)
         {
             if (IsCheckmateMove(move, board))
@@ -148,18 +140,18 @@ public class MyBot : IChessBot
             }
         }
 
-        // Aspiration search constants.
+        // Aspiration search constants
         const int InitialAspirationWindow = 125;
         const int MaxAspirationDepth = 4;
         const int CheckmateScoreThreshold = 25000;
-        const int SafetyMargin = 10;  // Reserve a small buffer
+        const int SafetyMargin = 10;
 
         short timeFraction = Math.Max(GetTimeSpentFraction(timer), (short)1);
         int maxTimeForTurn = ConstantDepth
             ? int.MaxValue
             : (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 3);
 
-        // Iterative deepening loop.
+        // Iterative deepening loop
         while ((ConstantDepth && depth <= MaxDepth) || (!ConstantDepth && timer.MillisecondsElapsedThisTurn - SafetyMargin < maxTimeForTurn))
         {
             currentDepth = depth;
@@ -176,17 +168,26 @@ public class MyBot : IChessBot
                 int currentBestScore = -InfiniteScore;
                 bestMove = legalMoves[0];
 
-                // Order moves using the helper.
                 Move[] movesToOrder = OrderMoves(legalMoves, board, 0, previousBestMove);
 
                 foreach (Move move in movesToOrder)
                 {
                     if (!ConstantDepth && timer.MillisecondsElapsedThisTurn >= maxTimeForTurn)
-                        return EvalLog(bestMove, board, currentDepth, false);
+                    {
+                        LogEval(board, currentDepth, false);
+                        return bestMove;
+                    }
 
                     board.MakeMove(move);
                     int score = -Negamax(board, depth - 1, -beta, -alpha, 1);
                     board.UndoMove(move);
+
+                    // Early exit if mate-in-one is found after depth 1
+                    if (depth > 1 && Math.Abs(score) >= InfiniteScore - 50)
+                    {
+                        LogEval(board, currentDepth, false);
+                        return move;
+                    }
 
                     if (score > currentBestScore)
                     {
@@ -218,10 +219,9 @@ public class MyBot : IChessBot
 
             previousBestMove = bestMove;
             depth++;
-            //EvalLog(bestMove, board, currentDepth);
         }
 
-        return bestMove;//EvalLog(bestMove, board, currentDepth, false);
+        return bestMove;
     }
 
     // --- Killer moves & History management ---
@@ -269,7 +269,7 @@ public class MyBot : IChessBot
         return isCheckmate;
     }
 
-    // --- Move ordering helper (used by both Think and search methods) ---
+    // --- Move ordering helper ---
     private int MoveOrdering(Move move, Board board, int ply = 0)
     {
         ulong key = board.ZobristKey;
@@ -278,14 +278,10 @@ public class MyBot : IChessBot
             return 1000000;
 
         int score = historyMoves[move.StartSquare.Index, move.TargetSquare.Index];
-
-        // Captures: MVV-LVA
         var capturedPiece = board.GetPiece(move.TargetSquare);
         if (capturedPiece.PieceType != PieceType.None)
             score += 100000 + GetPieceValue(capturedPiece.PieceType) * 10 -
                      GetPieceValue(board.GetPiece(move.StartSquare).PieceType);
-
-        // Promotion moves.
         if (move.IsPromotion)
             score += 80000 + GetPieceValue(move.PromotionPieceType);
 
@@ -319,7 +315,6 @@ public class MyBot : IChessBot
 
         if (depth <= 0) return Quiescence(board, alpha, beta, ply);
 
-        // Null Move Pruning.
         if (!board.IsInCheck() && depth > 2)
         {
             board.ForceSkipTurn();
@@ -339,8 +334,6 @@ public class MyBot : IChessBot
         for (int i = 0; i < moves.Length; i++)
         {
             Move move = moves[i];
-
-            // Futility pruning.
             if (depth <= 3 && !board.IsInCheck() && !move.IsCapture && !move.IsPromotion &&
                 standPat + 150 * depth < alpha)
             {
@@ -353,7 +346,6 @@ public class MyBot : IChessBot
 
             if (givesCheck)
                 newDepth += 1;
-
             if (depth > 2 && !move.IsCapture && !move.IsPromotion && !givesCheck)
             {
                 int reduction = 1 + (i / 5);
@@ -409,7 +401,6 @@ public class MyBot : IChessBot
         alpha = Math.Max(alpha, standPat);
 
         Move[] captureMoves = OrderMoves(board.GetLegalMoves(true), board, ply);
-
         foreach (Move move in captureMoves)
         {
             board.MakeMove(move);
@@ -426,13 +417,23 @@ public class MyBot : IChessBot
     {
         if (board.IsDraw()) return 0;
 
-        int score = 0;
         bool isEndgame = IsEndgame(board);
+        int[][][] adjustmentTables = new int[][][]
+        {
+            PawnTable,
+            KnightTable,
+            BishopTable,
+            RookTable,
+            QueenTable,
+            isEndgame ? KingEndGame : KingMiddleGame
+        };
+
+        int score = 0;
         foreach (PieceList pieceList in board.GetAllPieceLists())
         {
             var pieceType = pieceList.TypeOfPieceInList;
-            int pieceValue = GetPieceValue(pieceType);
-            int[][] adjustmentTable = GetAdjustmentTable(pieceType, isEndgame);
+            int pieceValue = PieceValues[(int)pieceType - 1];
+            int[][] adjustmentTable = adjustmentTables[(int)pieceType - 1];
             foreach (Piece piece in pieceList)
             {
                 int rank = piece.IsWhite ? 7 - piece.Square.Rank : piece.Square.Rank;
@@ -441,20 +442,6 @@ public class MyBot : IChessBot
             }
         }
         return board.IsWhiteToMove ? score : -score;
-    }
-
-    private int[][] GetAdjustmentTable(PieceType pieceType, bool isEndgame)
-    {
-        return pieceType switch
-        {
-            PieceType.Pawn => PawnTable,
-            PieceType.Knight => KnightTable,
-            PieceType.Bishop => BishopTable,
-            PieceType.Rook => RookTable,
-            PieceType.Queen => QueenTable,
-            PieceType.King => isEndgame ? KingEndGame : KingMiddleGame,
-            _ => new int[8][]
-        };
     }
 
     private bool IsEndgame(Board board)
