@@ -9,6 +9,7 @@ public class EvilBot : IChessBot
     // Constants
     private const bool ConstantDepth = false;
     private const short MaxDepth = 6; // Only does anything when Constant depth is true
+    private const short MaxSafetyDepth = 99; // New absolute maximum safety depth
     private const short InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22;
 
@@ -35,13 +36,6 @@ public class EvilBot : IChessBot
         Console.WriteLine($"{GetType().Name}: {message}");
     }
 
-    private short GetTimeSpentFraction(Timer timer)
-    {
-        if (timer.MillisecondsRemaining <= 5_000) return 40;
-        else if (timer.MillisecondsRemaining < 20_000) return 30;
-        else if (timer.MillisecondsRemaining > 60_000) return 22;
-        else return 25;
-    }
 
     private string? GetMateInMoves(int score)
     {
@@ -103,6 +97,15 @@ public class EvilBot : IChessBot
         return move;
     }
 
+    private short GetTimeSpentFraction(Timer timer)
+    {
+        if (timer.MillisecondsRemaining <= 1_000) return 60;
+        if (timer.MillisecondsRemaining <= 5_000) return 42;
+        else if (timer.MillisecondsRemaining < 20_000) return 30;
+        else return 25;
+    }
+
+
     public Move Think(Board board, Timer timer)
     {
         // Reset state between moves
@@ -131,7 +134,7 @@ public class EvilBot : IChessBot
             return HandleForcedMove(legalMoves[0], board, 1, true);
         }
 
-        // Immediate checkmate check with early exit
+        // Immediate checkmate check
         foreach (Move move in legalMoves)
         {
             if (IsCheckmateMove(move, board))
@@ -149,10 +152,12 @@ public class EvilBot : IChessBot
         short timeFraction = Math.Max(GetTimeSpentFraction(timer), (short)1);
         int maxTimeForTurn = ConstantDepth
             ? int.MaxValue
-            : (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 3);
+            : (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 4);
 
-        // Iterative deepening loop
-        while ((ConstantDepth && depth <= MaxDepth) || (!ConstantDepth && timer.MillisecondsElapsedThisTurn - SafetyMargin < maxTimeForTurn))
+        // Iterative deepening loop with MaxSafetyDepth cap
+        while (depth <= MaxSafetyDepth &&
+               (ConstantDepth && depth <= MaxDepth ||
+                !ConstantDepth && timer.MillisecondsElapsedThisTurn - SafetyMargin < maxTimeForTurn))
         {
             currentDepth = depth;
             bool useAspiration = depth > MaxAspirationDepth && Math.Abs(previousBestScore) < CheckmateScoreThreshold;
@@ -181,13 +186,6 @@ public class EvilBot : IChessBot
                     board.MakeMove(move);
                     int score = -Negamax(board, depth - 1, -beta, -alpha, 1);
                     board.UndoMove(move);
-
-                    // Early exit if mate-in-one is found after depth 1
-                    if (depth > 1 && Math.Abs(score) >= InfiniteScore - 50)
-                    {
-                        LogEval(board, currentDepth, false);
-                        return move;
-                    }
 
                     if (score > currentBestScore)
                     {

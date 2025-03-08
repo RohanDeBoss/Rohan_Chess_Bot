@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v1.7 Code refactor and Automatic MyBot/Evil Name debug switching
+// v1.7.1 Time management update + Tidy up
 public class MyBot : IChessBot
 {
     // Constants
@@ -36,22 +36,14 @@ public class MyBot : IChessBot
         Console.WriteLine($"{GetType().Name}: {message}");
     }
 
-    private short GetTimeSpentFraction(Timer timer)
-    {
-        if (timer.MillisecondsRemaining <= 5_000) return 40;
-        else if (timer.MillisecondsRemaining < 20_000) return 30;
-        else if (timer.MillisecondsRemaining > 60_000) return 22;
-        else return 25;
-    }
-
     private string? GetMateInMoves(int score)
     {
         int mateMoves = (InfiniteScore - Math.Abs(score) + 1) / 50;
         if (Math.Abs(score) >= InfiniteScore - 1500 && mateMoves <= currentDepth)
         {
             return score > 0
-                ? $"Mate in {mateMoves} ply! :)"
-                : $"Mated in {mateMoves} ply :(";
+                ? $"Win Mate in {mateMoves} ply! :)"
+                : $"Losing Mate in {mateMoves} ply :(";
         }
         return null;
     }
@@ -61,14 +53,14 @@ public class MyBot : IChessBot
         if (isForcedMove)
         {
             Console.WriteLine();
-            Console.WriteLine($"{GetType().Name}: I must play a FORCED MOVE!");
+            Console.WriteLine($"{GetType().Name}: FORCED MOVE!");
         }
         else
         {
             Console.WriteLine();
             DebugLog($"Depth: {depth}");
             string mateInfo = GetMateInMoves(bestScore) ?? string.Empty;
-            DebugLog(!string.IsNullOrEmpty(mateInfo) ? mateInfo : "No forced mate found");
+            DebugLog(!string.IsNullOrEmpty(mateInfo) ? mateInfo : "No mate found");
             DebugLog($"Eval: {bestScore * (board.IsWhiteToMove ? 1 : -1)}");
             DebugLog($"Total: {negamaxPositions + qsearchPositions:N0}");
         }
@@ -103,6 +95,15 @@ public class MyBot : IChessBot
         LogEval(board, forcedDepth, isForcedMove);
         return move;
     }
+
+    private short GetTimeSpentFraction(Timer timer)
+    {
+        if (timer.MillisecondsRemaining <= 1_000) return 60;
+        if (timer.MillisecondsRemaining <= 5_000) return 42;
+        else if (timer.MillisecondsRemaining < 20_000) return 30;
+        else return 25;
+    }
+
 
     public Move Think(Board board, Timer timer)
     {
@@ -150,7 +151,7 @@ public class MyBot : IChessBot
         short timeFraction = Math.Max(GetTimeSpentFraction(timer), (short)1);
         int maxTimeForTurn = ConstantDepth
             ? int.MaxValue
-            : (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 3);
+            : (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 4);
 
         // Iterative deepening loop with MaxSafetyDepth cap
         while (depth <= MaxSafetyDepth &&
