@@ -3,13 +3,12 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v1.8.2 More pruning adjustments
+// v1.8.3 Small formatting changes
 public class MyBot : IChessBot
 {
-    // --- Constants and Tunable Parameters ---
 
     // Search Parameters
-    private const bool ConstantDepth = false;
+    private const bool ConstantDepth = true;
     private const short MaxDepth = 6;         // Used when ConstantDepth is true
     private const short MaxSafetyDepth = 99;
     private const int InfiniteScore = 30000;
@@ -85,8 +84,6 @@ public class MyBot : IChessBot
         }
     }
 
-
-    // --- Move Ordering ---
 
     private Move[] OrderMoves(Move[] moves, Board board, int ply, Move? previousBestMove = null)
     {
@@ -399,6 +396,7 @@ public class MyBot : IChessBot
         return localBestScore;
     }
 
+
     private int Quiescence(Board board, int alpha, int beta, int ply)
     {
         qsearchPositions++;
@@ -419,34 +417,27 @@ public class MyBot : IChessBot
         return alpha;
     }
 
-    // --- Evaluation ---
 
     private int Evaluate(Board board)
     {
         if (board.IsDraw()) return 0;
-
         bool isEndgame = IsEndgame(board);
         int[][][] adjustmentTables = new int[][][]
         {
-            PawnTable,
-            KnightTable,
-            BishopTable,
-            RookTable,
-            QueenTable,
-            isEndgame ? KingEndGame : KingMiddleGame
+        PawnTable, KnightTable, BishopTable, RookTable, QueenTable,
+        isEndgame ? KingEndGame : KingMiddleGame
         };
 
         int score = 0;
-        foreach (PieceList pieceList in board.GetAllPieceLists())
+        foreach (PieceList list in board.GetAllPieceLists())
         {
-            var pieceType = pieceList.TypeOfPieceInList;
-            int pieceValue = PieceValues[(int)pieceType - 1];
-            int[][] adjustmentTable = adjustmentTables[(int)pieceType - 1];
-            foreach (Piece piece in pieceList)
+            int baseVal = PieceValues[(int)list.TypeOfPieceInList - 1];
+            int[][] table = adjustmentTables[(int)list.TypeOfPieceInList - 1];
+            foreach (Piece p in list)
             {
-                int rank = piece.IsWhite ? 7 - piece.Square.Rank : piece.Square.Rank;
-                int adjustment = adjustmentTable[rank][piece.Square.File];
-                score += (piece.IsWhite ? 1 : -1) * (pieceValue + adjustment);
+                // For white, adjust rank from the bottom; for black, use the rank as-is.
+                int r = p.IsWhite ? 7 - p.Square.Rank : p.Square.Rank;
+                score += (p.IsWhite ? 1 : -1) * (baseVal + table[r][p.Square.File]);
             }
         }
         return board.IsWhiteToMove ? score : -score;

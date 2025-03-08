@@ -3,13 +3,12 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v1.8 Reorderd and reorganised code
+// v1.8.3 Small formatting changes
 public class MyBot : IChessBot
 {
-    // --- Constants and Tunable Parameters ---
 
     // Search Parameters
-    private const bool ConstantDepth = false;
+    private const bool ConstantDepth = true;
     private const short MaxDepth = 6;         // Used when ConstantDepth is true
     private const short MaxSafetyDepth = 99;
     private const int InfiniteScore = 30000;
@@ -56,12 +55,13 @@ public class MyBot : IChessBot
 
     private string? GetMateInMoves(int score)
     {
-        int mateMoves = (InfiniteScore - Math.Abs(score) + 1) / 50;
-        if (Math.Abs(score) >= InfiniteScore - 1500 && mateMoves <= currentDepth)
+        if (Math.Abs(score) >= InfiniteScore - 1500)  // Threshold for mate scores
         {
+            int matePly = (InfiniteScore - Math.Abs(score) + 1) / 50;
+            int mateMoves = (matePly + 1) / 2;  // Convert ply to full moves, rounding up
             return score > 0
-                ? $"Winning Mate in {mateMoves} ply! :)"
-                : $"Losing Mate in {mateMoves} ply :(";
+                ? $"Winning Mate in {matePly} ply! :)"
+                : $"Losing Mate in {matePly} ply! :(";
         }
         return null;
     }
@@ -84,8 +84,6 @@ public class MyBot : IChessBot
         }
     }
 
-
-    // --- Move Ordering ---
 
     private Move[] OrderMoves(Move[] moves, Board board, int ply, Move? previousBestMove = null)
     {
@@ -146,10 +144,14 @@ public class MyBot : IChessBot
         }
     }
 
+    private const int HISTORY_SCORE_CAP = 1_000_000; // Maximum history score, adjustable
+
     private void UpdateHistoryMove(Move move, int depth)
     {
         if (move.CapturePieceType != PieceType.None) return;
-        historyMoves[move.StartSquare.Index, move.TargetSquare.Index] += depth * depth;
+        int increment = depth * depth;
+        int idx1 = move.StartSquare.Index, idx2 = move.TargetSquare.Index;
+        historyMoves[idx1, idx2] = Math.Min(historyMoves[idx1, idx2] + increment, HISTORY_SCORE_CAP);
         if ((negamaxPositions + qsearchPositions) % 512 == 0)
             DecayHistory();
     }
@@ -309,7 +311,8 @@ public class MyBot : IChessBot
 
         if (depth <= 0) return Quiescence(board, alpha, beta, ply);
 
-        if (!board.IsInCheck() && depth > 2)
+        // Modified null move pruning condition (only apply if depth > 3):
+        if (!board.IsInCheck() && depth > 3)
         {
             board.ForceSkipTurn();
             int reduction = Math.Min(3, 1 + depth / 4);
@@ -328,22 +331,27 @@ public class MyBot : IChessBot
         for (int i = 0; i < moves.Length; i++)
         {
             Move move = moves[i];
-            if (depth <= 3 && !board.IsInCheck() && !move.IsCapture && !move.IsPromotion &&
-                standPat + 150 * depth < alpha)
+            board.MakeMove(move);
+            bool givesCheck = board.IsInCheck();
+            board.UndoMove(move);
+
+            // Modified futility pruning (multiplier reduced from 150 to 100):
+            if (depth <= 3 && depth > 1 && !board.IsInCheck() && !givesCheck && !move.IsCapture && !move.IsPromotion &&
+                standPat + 100 * depth < alpha)
             {
                 continue;
             }
 
             board.MakeMove(move);
-            bool givesCheck = board.IsInCheck();
             int newDepth = depth - 1;
 
             if (givesCheck)
                 newDepth += 1;
+
             if (depth > 2 && !move.IsCapture && !move.IsPromotion && !givesCheck)
             {
                 int reduction = 1 + (i / 5);
-                newDepth = Math.Max(newDepth - reduction, 0);
+                newDepth = Math.Max(newDepth - reduction, 1);
             }
 
             int score;
@@ -369,6 +377,7 @@ public class MyBot : IChessBot
                 localBestScore = score;
                 bestMove = move;
             }
+
             alpha = Math.Max(alpha, score);
             if (alpha >= beta)
             {
@@ -386,6 +395,7 @@ public class MyBot : IChessBot
         AddTT(key, depth, (short)localBestScore, flag, bestMove);
         return localBestScore;
     }
+
 
     private int Quiescence(Board board, int alpha, int beta, int ply)
     {
@@ -407,34 +417,27 @@ public class MyBot : IChessBot
         return alpha;
     }
 
-    // --- Evaluation ---
 
     private int Evaluate(Board board)
     {
         if (board.IsDraw()) return 0;
-
         bool isEndgame = IsEndgame(board);
         int[][][] adjustmentTables = new int[][][]
         {
-            PawnTable,
-            KnightTable,
-            BishopTable,
-            RookTable,
-            QueenTable,
-            isEndgame ? KingEndGame : KingMiddleGame
+        PawnTable, KnightTable, BishopTable, RookTable, QueenTable,
+        isEndgame ? KingEndGame : KingMiddleGame
         };
 
         int score = 0;
-        foreach (PieceList pieceList in board.GetAllPieceLists())
+        foreach (PieceList list in board.GetAllPieceLists())
         {
-            var pieceType = pieceList.TypeOfPieceInList;
-            int pieceValue = PieceValues[(int)pieceType - 1];
-            int[][] adjustmentTable = adjustmentTables[(int)pieceType - 1];
-            foreach (Piece piece in pieceList)
+            int baseVal = PieceValues[(int)list.TypeOfPieceInList - 1];
+            int[][] table = adjustmentTables[(int)list.TypeOfPieceInList - 1];
+            foreach (Piece p in list)
             {
-                int rank = piece.IsWhite ? 7 - piece.Square.Rank : piece.Square.Rank;
-                int adjustment = adjustmentTable[rank][piece.Square.File];
-                score += (piece.IsWhite ? 1 : -1) * (pieceValue + adjustment);
+                // For white, adjust rank from the bottom; for black, use the rank as-is.
+                int r = p.IsWhite ? 7 - p.Square.Rank : p.Square.Rank;
+                score += (p.IsWhite ? 1 : -1) * (baseVal + table[r][p.Square.File]);
             }
         }
         return board.IsWhiteToMove ? score : -score;
