@@ -42,7 +42,7 @@ public class MyBot : IChessBot
         if (Math.Abs(score) >= InfiniteScore - 1500 && mateMoves <= currentDepth)
         {
             return score > 0
-                ? $"Win Mate in {mateMoves} ply! :)"
+                ? $"Winning Mate in {mateMoves} ply! :)"
                 : $"Losing Mate in {mateMoves} ply :(";
         }
         return null;
