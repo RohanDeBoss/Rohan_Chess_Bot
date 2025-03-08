@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v1.9 Pawn evaluation and passed pawn bonus
+// v1.9.2 I am speed? More optimisations to the evaluation function.
 public class MyBot : IChessBot
 {
 
@@ -417,11 +417,12 @@ public class MyBot : IChessBot
         return alpha;
     }
 
-
     private int Evaluate(Board board)
     {
         if (board.IsDraw()) return 0;
         bool isEndgame = IsEndgame(board);
+
+        // Define adjustment tables for piece-square tables
         int[][][] adjustmentTables = new int[][][]
         {
         PawnTable, KnightTable, BishopTable, RookTable, QueenTable,
@@ -429,19 +430,33 @@ public class MyBot : IChessBot
         };
 
         int score = 0;
+
+        // Piece evaluation
         foreach (PieceList list in board.GetAllPieceLists())
         {
-            int baseVal = PieceValues[(int)list.TypeOfPieceInList - 1];
-            int[][] table = adjustmentTables[(int)list.TypeOfPieceInList - 1];
+            int pieceType = (int)list.TypeOfPieceInList - 1;
+            int[][] table = adjustmentTables[pieceType];
+            int baseVal = PieceValues[pieceType];
+            bool isWhite = list.IsWhitePieceList;
+
             foreach (Piece p in list)
             {
-                int r = p.IsWhite ? 7 - p.Square.Rank : p.Square.Rank;
-                score += (p.IsWhite ? 1 : -1) * (baseVal + table[r][p.Square.File]);
+                int r = p.Square.Rank;
+                r = isWhite ? 7 - r : r;
+                score += (isWhite ? 1 : -1) * (baseVal + table[r][p.Square.File]);
             }
         }
 
+        // Pawn bonuses
         score += EvaluatePassedPawns(board, true);
         score -= EvaluatePassedPawns(board, false);
+
+        // Endgame king optimization
+        if (isEndgame)
+        {
+            score += EvaluateKingProximity(board, true);
+            score -= EvaluateKingProximity(board, false);
+        }
 
         return board.IsWhiteToMove ? score : -score;
     }
@@ -449,8 +464,8 @@ public class MyBot : IChessBot
     private int EvaluatePassedPawns(Board board, bool isWhite)
     {
         int bonus = 0;
-        int[] enemyRank = new int[8];
-        Array.Fill(enemyRank, isWhite ? -1 : 8);
+        Span<int> enemyRank = stackalloc int[8];
+        enemyRank.Fill(isWhite ? -1 : 8);
 
         // Process enemy pawns
         PieceList enemyPawns = board.GetPieceList(PieceType.Pawn, !isWhite);
@@ -458,42 +473,83 @@ public class MyBot : IChessBot
         {
             int f = p.Square.File;
             int r = p.Square.Rank;
-            if (isWhite ? r > enemyRank[f] : r < enemyRank[f])
-                enemyRank[f] = r;
+            ref int current = ref enemyRank[f];
+            current = isWhite ? (r > current ? r : current) : (r < current ? r : current);
         }
 
         // Process friendly pawns
         PieceList friendPawns = board.GetPieceList(PieceType.Pawn, isWhite);
+        Square kingSquare = board.GetKingSquare(isWhite);
+        int kFile = kingSquare.File;
+        int kRank = kingSquare.Rank;
+
         for (int i = 0; i < friendPawns.Count; i++)
         {
             Piece p = friendPawns[i];
             int f = p.Square.File;
             int r = p.Square.Rank;
 
-            // Check adjacent files using direct comparisons
-            int leftFile = f > 0 ? enemyRank[f - 1] : (isWhite ? -1 : 8);
-            int currentFile = enemyRank[f];
-            int rightFile = f < 7 ? enemyRank[f + 1] : (isWhite ? -1 : 8);
+            // Adjacent files with boundary checks
+            int left = f > 0 ? enemyRank[f - 1] : (isWhite ? -1 : 8);
+            int center = enemyRank[f];
+            int right = f < 7 ? enemyRank[f + 1] : (isWhite ? -1 : 8);
 
             bool passed;
             if (isWhite)
             {
-                int maxEnemyRank = Math.Max(leftFile, Math.Max(currentFile, rightFile));
-                passed = maxEnemyRank < r;
+                int max = left > center ? left : center;
+                passed = (max > right ? max : right) < r;
             }
             else
             {
-                int minEnemyRank = Math.Min(leftFile, Math.Min(currentFile, rightFile));
-                passed = minEnemyRank > r;
+                int min = left < center ? left : center;
+                passed = (min < right ? min : right) > r;
             }
 
             if (passed)
-                bonus += isWhite ? r * 20 : (7 - r) * 20;
+            {
+                // Fast king distance calculation
+                int dFile = Math.Abs(kFile - f);
+                int dRank = Math.Abs(kRank - r);
+                bonus += (isWhite ? r << 4 : (7 - r) << 4) + // Base (r * 16)
+                         (20 - (dFile + dRank) * 5) +         // King proximity
+                         (isWhite ? r * r : (7 - r) * (7 - r)); // Advancement
+
+                // Connected pawns using bitwise checks
+                int connected = 0;
+                if (f > 0 && board.GetPiece(new Square(f - 1, r)).IsPawn) connected++;
+                if (f < 7 && board.GetPiece(new Square(f + 1, r)).IsPawn) connected++;
+                bonus += connected * 30;
+            }
         }
 
         return bonus;
     }
 
+    private int EvaluateKingProximity(Board board, bool isWhite)
+    {
+        Square myKing = board.GetKingSquare(isWhite);
+        Square enemyKing = board.GetKingSquare(!isWhite);
+
+        // Edge detection using bitmask
+        int ekFile = enemyKing.File;
+        int ekRank = enemyKing.Rank;
+        bool onEdge = (ekFile & 7) == 0 || (ekRank & 7) == 0;
+
+        int bonus = 0;
+
+        if (onEdge)
+        {
+            // Distance to corner using bitwise min
+            int fileDist = (ekFile < 4) ? ekFile : 7 - ekFile;
+            int rankDist = (ekRank < 4) ? ekRank : 7 - ekRank;
+            bonus += 50 - (fileDist + rankDist) * 10;
+        }
+
+        // Manhattan distance using direct coordinate math
+        int distance = Math.Abs(myKing.File - ekFile) + Math.Abs(myKing.Rank - ekRank);
+        return bonus + 30 - distance * 5;
+    }
 
     private bool IsEndgame(Board board)
     {
