@@ -506,8 +506,7 @@ public class MyBot : IChessBot
     private void AddTT(ulong key, int depth, short score, byte flag, Move bestMove)
     {
         int index = GetTTIndex(key);
-        var existing = tt[index];
-        if (existing.Key == 0 || depth > existing.Depth || (depth == existing.Depth && flag == EXACT))
+        if (tt[index].Key == 0 || tt[index].Depth <= depth)
             tt[index] = new TTEntry { Key = key, Depth = (short)depth, Score = score, Flag = flag, BestMove = bestMove };
     }
 
