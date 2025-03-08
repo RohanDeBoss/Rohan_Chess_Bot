@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v1.8 Reorderd and reorganised code
+// v1.8.2 More pruning adjustments
 public class MyBot : IChessBot
 {
     // --- Constants and Tunable Parameters ---
@@ -56,12 +56,13 @@ public class MyBot : IChessBot
 
     private string? GetMateInMoves(int score)
     {
-        int mateMoves = (InfiniteScore - Math.Abs(score) + 1) / 50;
-        if (Math.Abs(score) >= InfiniteScore - 1500 && mateMoves <= currentDepth)
+        if (Math.Abs(score) >= InfiniteScore - 1500)  // Threshold for mate scores
         {
+            int matePly = (InfiniteScore - Math.Abs(score) + 1) / 50;
+            int mateMoves = (matePly + 1) / 2;  // Convert ply to full moves, rounding up
             return score > 0
-                ? $"Winning Mate in {mateMoves} ply! :)"
-                : $"Losing Mate in {mateMoves} ply :(";
+                ? $"Winning Mate in {matePly} ply! :)"
+                : $"Losing Mate in {matePly} ply! :(";
         }
         return null;
     }
@@ -146,10 +147,14 @@ public class MyBot : IChessBot
         }
     }
 
+    private const int HISTORY_SCORE_CAP = 1_000_000; // Maximum history score, adjustable
+
     private void UpdateHistoryMove(Move move, int depth)
     {
         if (move.CapturePieceType != PieceType.None) return;
-        historyMoves[move.StartSquare.Index, move.TargetSquare.Index] += depth * depth;
+        int increment = depth * depth;
+        int idx1 = move.StartSquare.Index, idx2 = move.TargetSquare.Index;
+        historyMoves[idx1, idx2] = Math.Min(historyMoves[idx1, idx2] + increment, HISTORY_SCORE_CAP);
         if ((negamaxPositions + qsearchPositions) % 512 == 0)
             DecayHistory();
     }
@@ -309,7 +314,8 @@ public class MyBot : IChessBot
 
         if (depth <= 0) return Quiescence(board, alpha, beta, ply);
 
-        if (!board.IsInCheck() && depth > 2)
+        // Modified null move pruning condition (only apply if depth > 3):
+        if (!board.IsInCheck() && depth > 3)
         {
             board.ForceSkipTurn();
             int reduction = Math.Min(3, 1 + depth / 4);
@@ -328,22 +334,27 @@ public class MyBot : IChessBot
         for (int i = 0; i < moves.Length; i++)
         {
             Move move = moves[i];
-            if (depth <= 3 && !board.IsInCheck() && !move.IsCapture && !move.IsPromotion &&
-                standPat + 150 * depth < alpha)
+            board.MakeMove(move);
+            bool givesCheck = board.IsInCheck();
+            board.UndoMove(move);
+
+            // Modified futility pruning (multiplier reduced from 150 to 100):
+            if (depth <= 3 && depth > 1 && !board.IsInCheck() && !givesCheck && !move.IsCapture && !move.IsPromotion &&
+                standPat + 100 * depth < alpha)
             {
                 continue;
             }
 
             board.MakeMove(move);
-            bool givesCheck = board.IsInCheck();
             int newDepth = depth - 1;
 
             if (givesCheck)
                 newDepth += 1;
+
             if (depth > 2 && !move.IsCapture && !move.IsPromotion && !givesCheck)
             {
                 int reduction = 1 + (i / 5);
-                newDepth = Math.Max(newDepth - reduction, 0);
+                newDepth = Math.Max(newDepth - reduction, 1);
             }
 
             int score;
@@ -369,6 +380,7 @@ public class MyBot : IChessBot
                 localBestScore = score;
                 bestMove = move;
             }
+
             alpha = Math.Max(alpha, score);
             if (alpha >= beta)
             {

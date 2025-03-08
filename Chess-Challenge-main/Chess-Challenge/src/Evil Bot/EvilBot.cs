@@ -3,24 +3,41 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v1.7 Code refactor and Automatic MyBot/Evil Name debug switching
+// v1.8 Reorderd and reorganised code
 public class EvilBot : IChessBot
 {
-    // Constants
+    // --- Constants and Tunable Parameters ---
+
+    // Search Parameters
     private const bool ConstantDepth = false;
-    private const short MaxDepth = 6; // Only does anything when Constant depth is true
-    private const short MaxSafetyDepth = 99; // New absolute maximum safety depth
-    private const short InfiniteScore = 30000;
+    private const short MaxDepth = 6;         // Used when ConstantDepth is true
+    private const short MaxSafetyDepth = 99;
+    private const int InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22;
 
-    // Static Fields
-    private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 };
+    // Move Ordering Bonuses
+    private const int TT_MOVE_BONUS = 10_000_000;
+    private const int PREVIOUS_BEST_MOVE_BONUS = 5_000_000;
+    private const int CAPTURE_BASE_BONUS = 1_000_000;
+    private const int PROMOTION_BASE_BONUS = 900_000;
+    private const int KILLER_MOVE_BONUS = 800_000;
+    private const int MVV_LVA_MULTIPLIER = 10;
+    private const int HISTORY_MAX_BONUS = 700_000;
+
+    // Time Management
+    private const int INITIAL_ASPIRATION_WINDOW = 125;
+    private const int MAX_ASPIRATION_DEPTH = 4;
+    private const int CHECKMATE_SCORE_THRESHOLD = 25000;
+    private const int SAFETY_MARGIN = 10;
+
+
+    // --- Static Fields ---
+
     private TTEntry[] tt = new TTEntry[TT_SIZE];
     private readonly ulong ttMask = (ulong)(TT_SIZE - 1);
 
-    private int GetTTIndex(ulong key) => (int)(key & ttMask);
+    // --- Instance Fields ---
 
-    // Instance Fields
     private int negamaxPositions = 0;
     private int qsearchPositions = 0;
     private int bestScore;
@@ -30,12 +47,12 @@ public class EvilBot : IChessBot
     private ulong lastBoardHash;
     private int currentDepth;
 
-    // Debugging
+    // --- Debugging Methods ---
+
     private void DebugLog(string message)
     {
         Console.WriteLine($"{GetType().Name}: {message}");
     }
-
 
     private string? GetMateInMoves(int score)
     {
@@ -43,8 +60,8 @@ public class EvilBot : IChessBot
         if (Math.Abs(score) >= InfiniteScore - 1500 && mateMoves <= currentDepth)
         {
             return score > 0
-                ? $"Mate in {mateMoves} ply! :)"
-                : $"Mated in {mateMoves} ply :(";
+                ? $"Winning Mate in {mateMoves} ply! :)"
+                : $"Losing Mate in {mateMoves} ply :(";
         }
         return null;
     }
@@ -54,18 +71,21 @@ public class EvilBot : IChessBot
         if (isForcedMove)
         {
             Console.WriteLine();
-            Console.WriteLine($"{GetType().Name}: I must play a FORCED MOVE!");
+            Console.WriteLine($"{GetType().Name}: FORCED MOVE!");
         }
         else
         {
             Console.WriteLine();
             DebugLog($"Depth: {depth}");
             string mateInfo = GetMateInMoves(bestScore) ?? string.Empty;
-            DebugLog(!string.IsNullOrEmpty(mateInfo) ? mateInfo : "No forced mate found");
+            DebugLog(!string.IsNullOrEmpty(mateInfo) ? mateInfo : "No mate found");
             DebugLog($"Eval: {bestScore * (board.IsWhiteToMove ? 1 : -1)}");
             DebugLog($"Total: {negamaxPositions + qsearchPositions:N0}");
         }
     }
+
+
+    // --- Move Ordering ---
 
     private Move[] OrderMoves(Move[] moves, Board board, int ply, Move? previousBestMove = null)
     {
@@ -75,11 +95,30 @@ public class EvilBot : IChessBot
         for (int i = 0; i < moves.Length; i++)
         {
             int score = 0;
-            if (moves[i] == ttEntry.BestMove)
-                score += 10_000_000;
-            if (previousBestMove.HasValue && moves[i] == previousBestMove.Value)
-                score += 5_000_000;
-            score += MoveOrdering(moves[i], board, ply);
+            Move move = moves[i];
+
+            if (move == ttEntry.BestMove)
+                score += TT_MOVE_BONUS;
+            if (previousBestMove.HasValue && move == previousBestMove.Value)
+                score += PREVIOUS_BEST_MOVE_BONUS;
+            if (move.IsCapture)
+            {
+                var capturedPiece = board.GetPiece(move.TargetSquare);
+                int capturedValue = GetPieceValue(capturedPiece.PieceType);
+                int attackerValue = GetPieceValue(board.GetPiece(move.StartSquare).PieceType);
+                score += CAPTURE_BASE_BONUS + capturedValue * MVV_LVA_MULTIPLIER - attackerValue;
+            }
+            if (move.IsPromotion)
+            {
+                score += PROMOTION_BASE_BONUS + GetPieceValue(move.PromotionPieceType);
+            }
+            if (IsKillerMove(move, ply))
+            {
+                score += KILLER_MOVE_BONUS;
+            }
+            int historyScore = historyMoves[move.StartSquare.Index, move.TargetSquare.Index];
+            score += Math.Min(historyScore, HISTORY_MAX_BONUS);
+
             scores[i] = score;
         }
 
@@ -87,14 +126,48 @@ public class EvilBot : IChessBot
         return moves;
     }
 
-    private Move HandleForcedMove(Move move, Board board, int forcedDepth, bool isForcedMove, int? overrideScore = null)
+    private bool IsKillerMove(Move move, int ply)
     {
-        board.MakeMove(move);
-        bestScore = overrideScore ?? -Evaluate(board);
-        board.UndoMove(move);
-        currentDepth = forcedDepth;
-        LogEval(board, forcedDepth, isForcedMove);
-        return move;
+        int killerIndex0 = ply * 2;
+        int killerIndex1 = ply * 2 + 1;
+        return (killerMoves.Count > killerIndex0 && move == killerMoves[killerIndex0]) ||
+               (killerMoves.Count > killerIndex1 && move == killerMoves[killerIndex1]);
+    }
+
+    private void UpdateKillerMoves(Move move, int ply)
+    {
+        if (move.CapturePieceType != PieceType.None) return;
+        EnsureKillerMovesSize(ply);
+        int killerIndex = ply * 2;
+        if (move != killerMoves[killerIndex])
+        {
+            killerMoves[killerIndex + 1] = killerMoves[killerIndex];
+            killerMoves[killerIndex] = move;
+        }
+    }
+
+    private void UpdateHistoryMove(Move move, int depth)
+    {
+        if (move.CapturePieceType != PieceType.None) return;
+        historyMoves[move.StartSquare.Index, move.TargetSquare.Index] += depth * depth;
+        if ((negamaxPositions + qsearchPositions) % 512 == 0)
+            DecayHistory();
+    }
+
+    private void DecayHistory()
+    {
+        for (int i = 0; i < 64; i++)
+            for (int j = 0; j < 64; j++)
+                historyMoves[i, j] = (historyMoves[i, j] * 4) / 5;
+    }
+
+    private void EnsureKillerMovesSize(int ply)
+    {
+        int requiredSize = (ply * 2) + 2;
+        while (killerMoves.Count < requiredSize)
+        {
+            killerMoves.Add(Move.NullMove);
+        }
     }
 
     private short GetTimeSpentFraction(Timer timer)
@@ -104,7 +177,6 @@ public class EvilBot : IChessBot
         else if (timer.MillisecondsRemaining < 20_000) return 30;
         else return 25;
     }
-
 
     public Move Think(Board board, Timer timer)
     {
@@ -143,12 +215,6 @@ public class EvilBot : IChessBot
             }
         }
 
-        // Aspiration search constants
-        const int InitialAspirationWindow = 125;
-        const int MaxAspirationDepth = 4;
-        const int CheckmateScoreThreshold = 25000;
-        const int SafetyMargin = 10;
-
         short timeFraction = Math.Max(GetTimeSpentFraction(timer), (short)1);
         int maxTimeForTurn = ConstantDepth
             ? int.MaxValue
@@ -157,14 +223,14 @@ public class EvilBot : IChessBot
         // Iterative deepening loop with MaxSafetyDepth cap
         while (depth <= MaxSafetyDepth &&
                (ConstantDepth && depth <= MaxDepth ||
-                !ConstantDepth && timer.MillisecondsElapsedThisTurn - SafetyMargin < maxTimeForTurn))
+                !ConstantDepth && timer.MillisecondsElapsedThisTurn - SAFETY_MARGIN < maxTimeForTurn))
         {
             currentDepth = depth;
-            bool useAspiration = depth > MaxAspirationDepth && Math.Abs(previousBestScore) < CheckmateScoreThreshold;
+            bool useAspiration = depth > MAX_ASPIRATION_DEPTH && Math.Abs(previousBestScore) < CHECKMATE_SCORE_THRESHOLD;
 
             int alpha = -InfiniteScore;
             int beta = InfiniteScore;
-            int aspirationWindow = InitialAspirationWindow;
+            int aspirationWindow = INITIAL_ASPIRATION_WINDOW;
             bool aspirationFailed;
 
             do
@@ -219,78 +285,8 @@ public class EvilBot : IChessBot
             depth++;
         }
 
+        LogEval(board, currentDepth, false);
         return bestMove;
-    }
-
-    // --- Killer moves & History management ---
-    private void EnsureKillerMovesSize(int ply)
-    {
-        int requiredSize = (ply * 2) + 2;
-        while (killerMoves.Count < requiredSize)
-        {
-            killerMoves.Add(Move.NullMove);
-        }
-    }
-
-    private void UpdateKillerMoves(Move move, int ply)
-    {
-        if (move.CapturePieceType != PieceType.None) return;
-        EnsureKillerMovesSize(ply);
-        int killerIndex = ply * 2;
-        if (move != killerMoves[killerIndex])
-        {
-            killerMoves[killerIndex + 1] = killerMoves[killerIndex];
-            killerMoves[killerIndex] = move;
-        }
-    }
-
-    private void UpdateHistoryMove(Move move, int depth)
-    {
-        if (move.CapturePieceType != PieceType.None) return;
-        historyMoves[move.StartSquare.Index, move.TargetSquare.Index] += depth * depth;
-        if ((negamaxPositions + qsearchPositions) % 512 == 0)
-            DecayHistory();
-    }
-
-    private void DecayHistory()
-    {
-        for (int i = 0; i < 64; i++)
-            for (int j = 0; j < 64; j++)
-                historyMoves[i, j] = (historyMoves[i, j] * 4) / 5;
-    }
-
-    private bool IsCheckmateMove(Move move, Board board)
-    {
-        board.MakeMove(move);
-        bool isCheckmate = board.IsInCheckmate();
-        board.UndoMove(move);
-        return isCheckmate;
-    }
-
-    // --- Move ordering helper ---
-    private int MoveOrdering(Move move, Board board, int ply = 0)
-    {
-        ulong key = board.ZobristKey;
-        int index = GetTTIndex(key);
-        if (tt[index].Key == key && tt[index].BestMove == move)
-            return 1000000;
-
-        int score = historyMoves[move.StartSquare.Index, move.TargetSquare.Index];
-        var capturedPiece = board.GetPiece(move.TargetSquare);
-        if (capturedPiece.PieceType != PieceType.None)
-            score += 100000 + GetPieceValue(capturedPiece.PieceType) * 10 -
-                     GetPieceValue(board.GetPiece(move.StartSquare).PieceType);
-        if (move.IsPromotion)
-            score += 80000 + GetPieceValue(move.PromotionPieceType);
-
-        int killerIndex0 = ply * 2;
-        int killerIndex1 = ply * 2 + 1;
-        if ((killerMoves.Count > killerIndex0 && move == killerMoves[killerIndex0]) ||
-            (killerMoves.Count > killerIndex1 && move == killerMoves[killerIndex1]))
-        {
-            score += 90000;
-        }
-        return score;
     }
 
     private int Negamax(Board board, int depth, int alpha, int beta, int ply)
@@ -411,6 +407,8 @@ public class EvilBot : IChessBot
         return alpha;
     }
 
+    // --- Evaluation ---
+
     private int Evaluate(Board board)
     {
         if (board.IsDraw()) return 0;
@@ -454,8 +452,41 @@ public class EvilBot : IChessBot
         return cachedPieceCount <= endgameThreshold;
     }
 
-    private int GetPieceValue(PieceType pieceType) =>
-        pieceType <= PieceType.King ? PieceValues[(int)pieceType - 1] : 0;
+    private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 }; // Pawn, Knight, Bishop, Rook, Queen, King
+
+    private int GetPieceValue(PieceType pieceType)
+    {
+        if (pieceType == PieceType.None)
+            return 0;
+        int index = (int)pieceType - 1;
+        if (index < 0 || index >= PieceValues.Length)
+            return 0;
+        return PieceValues[index];
+    }
+
+    // --- Helper Methods ---
+
+    private Move HandleForcedMove(Move move, Board board, int forcedDepth, bool isForcedMove, int? overrideScore = null)
+    {
+        board.MakeMove(move);
+        bestScore = overrideScore ?? -Evaluate(board);
+        board.UndoMove(move);
+        currentDepth = forcedDepth;
+        LogEval(board, forcedDepth, isForcedMove);
+        return move;
+    }
+
+
+    private bool IsCheckmateMove(Move move, Board board)
+    {
+        board.MakeMove(move);
+        bool isCheckmate = board.IsInCheckmate();
+        board.UndoMove(move);
+        return isCheckmate;
+    }
+
+
+    // --- Transposition Table ---
 
     private struct TTEntry
     {
@@ -470,14 +501,18 @@ public class EvilBot : IChessBot
     private const byte ALPHA = 1;
     private const byte BETA = 2;
 
+    private int GetTTIndex(ulong key) => (int)(key & ttMask);
+
     private void AddTT(ulong key, int depth, short score, byte flag, Move bestMove)
     {
         int index = GetTTIndex(key);
-        if (tt[index].Key == 0 || tt[index].Depth <= depth)
+        var existing = tt[index];
+        if (existing.Key == 0 || depth > existing.Depth || (depth == existing.Depth && flag == EXACT))
             tt[index] = new TTEntry { Key = key, Depth = (short)depth, Score = score, Flag = flag, BestMove = bestMove };
     }
 
     // --- Piece Square Tables ---
+
     private static readonly int[][] PawnTable = {
         new[] {0,  0,  0,  0,  0,  0,  0,  0},
         new[] {50, 50, 50, 50, 50, 50, 50, 50},
