@@ -8,7 +8,7 @@ public class EvilBot : IChessBot
 {
 
     // Search Parameters
-    private const bool ConstantDepth = true;
+    private const bool ConstantDepth = false;
     private const short MaxDepth = 6;         // Used when ConstantDepth is true
     private const short MaxSafetyDepth = 99;
     private const int InfiniteScore = 30000;
