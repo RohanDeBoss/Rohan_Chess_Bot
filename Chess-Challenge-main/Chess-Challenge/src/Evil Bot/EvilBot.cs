@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v1.9.1 King proximity bonus, improved pawn evaluation, and minor tweaks
+// v1.8.3 Small formatting changes
 public class EvilBot : IChessBot
 {
 
@@ -417,6 +417,7 @@ public class EvilBot : IChessBot
         return alpha;
     }
 
+
     private int Evaluate(Board board)
     {
         if (board.IsDraw()) return 0;
@@ -434,126 +435,12 @@ public class EvilBot : IChessBot
             int[][] table = adjustmentTables[(int)list.TypeOfPieceInList - 1];
             foreach (Piece p in list)
             {
+                // For white, adjust rank from the bottom; for black, use the rank as-is.
                 int r = p.IsWhite ? 7 - p.Square.Rank : p.Square.Rank;
                 score += (p.IsWhite ? 1 : -1) * (baseVal + table[r][p.Square.File]);
             }
         }
-
-        // Add passed pawn bonus for white and subtract for black.
-        score += EvaluatePassedPawns(board, true);
-        score -= EvaluatePassedPawns(board, false);
-
-        // Add king proximity and edge-of-board bonuses in the endgame
-        if (isEndgame)
-        {
-            score += EvaluateKingProximity(board, true);
-            score -= EvaluateKingProximity(board, false);
-        }
-
         return board.IsWhiteToMove ? score : -score;
-    }
-
-    private int EvaluatePassedPawns(Board board, bool isWhite)
-    {
-        int bonus = 0;
-        int[] enemyRank = new int[8];
-        Array.Fill(enemyRank, isWhite ? -1 : 8);
-
-        // Process enemy pawns
-        PieceList enemyPawns = board.GetPieceList(PieceType.Pawn, !isWhite);
-        foreach (Piece p in enemyPawns)
-        {
-            int f = p.Square.File;
-            int r = p.Square.Rank;
-            if (isWhite ? r > enemyRank[f] : r < enemyRank[f])
-                enemyRank[f] = r;
-        }
-
-        // Process friendly pawns
-        PieceList friendPawns = board.GetPieceList(PieceType.Pawn, isWhite);
-        for (int i = 0; i < friendPawns.Count; i++)
-        {
-            Piece p = friendPawns[i];
-            int f = p.Square.File;
-            int r = p.Square.Rank;
-
-            // Check adjacent files using direct comparisons
-            int leftFile = f > 0 ? enemyRank[f - 1] : (isWhite ? -1 : 8);
-            int currentFile = enemyRank[f];
-            int rightFile = f < 7 ? enemyRank[f + 1] : (isWhite ? -1 : 8);
-
-            bool passed;
-            if (isWhite)
-            {
-                int maxEnemyRank = Math.Max(leftFile, Math.Max(currentFile, rightFile));
-                passed = maxEnemyRank < r;
-            }
-            else
-            {
-                int minEnemyRank = Math.Min(leftFile, Math.Min(currentFile, rightFile));
-                passed = minEnemyRank > r;
-            }
-
-            if (passed)
-            {
-                // Base bonus for being a passed pawn
-                int baseBonus = isWhite ? r * 20 : (7 - r) * 20;
-
-                // Bonus for king proximity (supporting the pawn)
-                Square kingSquare = board.GetKingSquare(isWhite);
-                int kingDistance = Math.Abs(kingSquare.File - f) + Math.Abs(kingSquare.Rank - r);
-                int kingProximityBonus = Math.Max(0, 20 - kingDistance * 5);
-
-                // Bonus for pawn advancement (exponential scaling)
-                int advancementBonus = isWhite ? (r * r) : ((7 - r) * (7 - r));
-
-                // Bonus for connected pawns (pawns on adjacent files)
-                int connectedPawns = 0;
-                if (f > 0 && board.GetPiece(new Square(f - 1, r)).IsPawn && board.GetPiece(new Square(f - 1, r)).IsWhite == isWhite)
-                    connectedPawns++;
-                if (f < 7 && board.GetPiece(new Square(f + 1, r)).IsPawn && board.GetPiece(new Square(f + 1, r)).IsWhite == isWhite)
-                    connectedPawns++;
-                int connectedBonus = connectedPawns * 30;
-
-                // Total bonus for this passed pawn
-                bonus += baseBonus + kingProximityBonus + advancementBonus + connectedBonus;
-            }
-        }
-
-        return bonus;
-    }
-
-    private int EvaluateKingProximity(Board board, bool isWhite)
-    {
-        int bonus = 0;
-
-        // Get king positions
-        Square myKingSquare = board.GetKingSquare(isWhite);
-        Square enemyKingSquare = board.GetKingSquare(!isWhite);
-
-        // Calculate Manhattan distance between kings
-        int kingDistance = Math.Abs(myKingSquare.File - enemyKingSquare.File) + Math.Abs(myKingSquare.Rank - enemyKingSquare.Rank);
-
-        // Bonus for pushing the enemy king to the edge of the board
-        int enemyKingEdgeBonus = 0;
-        int enemyKingFile = enemyKingSquare.File;
-        int enemyKingRank = enemyKingSquare.Rank;
-
-        // Check if the enemy king is on the edge of the board
-        if (enemyKingFile == 0 || enemyKingFile == 7 || enemyKingRank == 0 || enemyKingRank == 7)
-        {
-            // Bonus scales with how close the enemy king is to the corner
-            int distanceToCorner = Math.Min(enemyKingFile, 7 - enemyKingFile) + Math.Min(enemyKingRank, 7 - enemyKingRank);
-            enemyKingEdgeBonus = 50 - distanceToCorner * 10;
-        }
-
-        // Bonus for pushing the kings closer together (to deliver checkmate)
-        int kingProximityBonus = 30 - kingDistance * 5;
-
-        // Total bonus
-        bonus += enemyKingEdgeBonus + kingProximityBonus;
-
-        return bonus;
     }
 
     private bool IsEndgame(Board board)

@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v1.9.3 testing move ordering changes
+// v1.8.3 Small formatting changes
 public class MyBot : IChessBot
 {
 
@@ -84,11 +84,8 @@ public class MyBot : IChessBot
         }
     }
 
-    // Add these constants near other move ordering bonuses
-    private const int ENDGAME_KING_PROXIMITY_BONUS = 15_000;
-    private const int PASSED_PAWN_ADVANCE_BONUS = 8_000;
 
-    private Move[] OrderMoves(Move[] moves, Board board, int ply, bool isEndgame, Square enemyKingSquare, Move? previousBestMove = null)
+    private Move[] OrderMoves(Move[] moves, Board board, int ply, Move? previousBestMove = null)
     {
         int[] scores = new int[moves.Length];
         TTEntry ttEntry = tt[GetTTIndex(board.ZobristKey)];
@@ -98,7 +95,6 @@ public class MyBot : IChessBot
             int score = 0;
             Move move = moves[i];
 
-            // Existing scoring logic
             if (move == ttEntry.BestMove)
                 score += TT_MOVE_BONUS;
             if (previousBestMove.HasValue && move == previousBestMove.Value)
@@ -111,39 +107,23 @@ public class MyBot : IChessBot
                 score += CAPTURE_BASE_BONUS + capturedValue * MVV_LVA_MULTIPLIER - attackerValue;
             }
             if (move.IsPromotion)
-                score += PROMOTION_BASE_BONUS + GetPieceValue(move.PromotionPieceType);
-            if (IsKillerMove(move, ply))
-                score += KILLER_MOVE_BONUS;
-
-            // New endgame optimizations
-            if (isEndgame)
             {
-                // King proximity bonus
-                if (move.MovePieceType == PieceType.King)
-                {
-                    int currentDist = Math.Abs(move.StartSquare.File - enemyKingSquare.File) 
-                                     + Math.Abs(move.StartSquare.Rank - enemyKingSquare.Rank);
-                    int newDist = Math.Abs(move.TargetSquare.File - enemyKingSquare.File) 
-                                  + Math.Abs(move.TargetSquare.Rank - enemyKingSquare.Rank);
-                    score += (currentDist - newDist) * ENDGAME_KING_PROXIMITY_BONUS;
-                }
-
-                // Passed pawn advance bonus
-                if (move.MovePieceType == PieceType.Pawn)
-                {
-                    int rankBonus = board.IsWhiteToMove ? move.TargetSquare.Rank : 7 - move.TargetSquare.Rank;
-                    score += rankBonus * PASSED_PAWN_ADVANCE_BONUS;
-                }
+                score += PROMOTION_BASE_BONUS + GetPieceValue(move.PromotionPieceType);
             }
+            if (IsKillerMove(move, ply))
+            {
+                score += KILLER_MOVE_BONUS;
+            }
+            int historyScore = historyMoves[move.StartSquare.Index, move.TargetSquare.Index];
+            score += Math.Min(historyScore, HISTORY_MAX_BONUS);
 
-            // History heuristic
-            score += Math.Min(historyMoves[move.StartSquare.Index, move.TargetSquare.Index], HISTORY_MAX_BONUS);
             scores[i] = score;
         }
 
         Array.Sort(scores, moves, Comparer<int>.Create((a, b) => b.CompareTo(a)));
         return moves;
     }
+
     private bool IsKillerMove(Move move, int ply)
     {
         int killerIndex0 = ply * 2;
@@ -213,8 +193,6 @@ public class MyBot : IChessBot
         int previousBestScore = 0;
         Move previousBestMove = Move.NullMove;
         var legalMoves = board.GetLegalMoves();
-        bool isEndgame = IsEndgame(board);
-        Square enemyKingSquare = board.GetKingSquare(!board.IsWhiteToMove);
         Move bestMove = legalMoves.Length > 0 ? legalMoves[0] : Move.NullMove;
 
         // No legal moves => game over
@@ -263,7 +241,7 @@ public class MyBot : IChessBot
                 int currentBestScore = -InfiniteScore;
                 bestMove = legalMoves[0];
 
-                Move[] movesToOrder = OrderMoves(legalMoves, board, 0, isEndgame, enemyKingSquare, previousBestMove);
+                Move[] movesToOrder = OrderMoves(legalMoves, board, 0, previousBestMove);
 
                 foreach (Move move in movesToOrder)
                 {
@@ -331,14 +309,9 @@ public class MyBot : IChessBot
             if (ttEntry.Flag == BETA && ttEntry.Score >= beta) return beta;
         }
 
-        // Call Quiescence if depth is exhausted
-        if (depth <= 0)
-            return Quiescence(board, alpha, beta, ply);
+        if (depth <= 0) return Quiescence(board, alpha, beta, ply);
 
-        // Calculate standPat (current evaluation without making any moves)
-        int standPat = Evaluate(board);
-
-        // Null move pruning (only apply if depth > 3)
+        // Modified null move pruning condition (only apply if depth > 3):
         if (!board.IsInCheck() && depth > 3)
         {
             board.ForceSkipTurn();
@@ -348,12 +321,8 @@ public class MyBot : IChessBot
             if (nullScore >= beta) return beta;
         }
 
-        // Calculate isEndgame and enemyKingSquare for move ordering
-        bool isEndgame = IsEndgame(board);
-        Square enemyKingSquare = board.GetKingSquare(!board.IsWhiteToMove);
-
-        // Get and order legal moves
-        Move[] moves = OrderMoves(board.GetLegalMoves(), board, ply, isEndgame, enemyKingSquare);
+        int standPat = Evaluate(board);
+        Move[] moves = OrderMoves(board.GetLegalMoves(), board, ply);
 
         int originalAlpha = alpha;
         Move bestMove = Move.NullMove;
@@ -366,11 +335,11 @@ public class MyBot : IChessBot
             bool givesCheck = board.IsInCheck();
             board.UndoMove(move);
 
-            // Futility pruning condition
+            // Modified futility pruning (multiplier reduced from 150 to 100):
             if (depth <= 3 && depth > 1 && !board.IsInCheck() && !givesCheck && !move.IsCapture && !move.IsPromotion &&
                 standPat + 100 * depth < alpha)
             {
-                continue; // Skip this move because it's unlikely to improve alpha
+                continue;
             }
 
             board.MakeMove(move);
@@ -398,6 +367,11 @@ public class MyBot : IChessBot
             }
             board.UndoMove(move);
 
+            if (score <= -InfiniteScore + ply)
+            {
+                newDepth -= 1;
+            }
+
             if (score > localBestScore)
             {
                 localBestScore = score;
@@ -422,6 +396,7 @@ public class MyBot : IChessBot
         return localBestScore;
     }
 
+
     private int Quiescence(Board board, int alpha, int beta, int ply)
     {
         qsearchPositions++;
@@ -429,13 +404,7 @@ public class MyBot : IChessBot
         if (standPat >= beta) return beta;
         alpha = Math.Max(alpha, standPat);
 
-        // Calculate isEndgame and enemyKingSquare here
-        bool isEndgame = IsEndgame(board);
-        Square enemyKingSquare = board.GetKingSquare(!board.IsWhiteToMove);
-
-        // Updated move ordering line
-        Move[] captureMoves = OrderMoves(board.GetLegalMoves(true), board, ply, isEndgame, enemyKingSquare);
-
+        Move[] captureMoves = OrderMoves(board.GetLegalMoves(true), board, ply);
         foreach (Move move in captureMoves)
         {
             board.MakeMove(move);
@@ -448,12 +417,11 @@ public class MyBot : IChessBot
         return alpha;
     }
 
+
     private int Evaluate(Board board)
     {
         if (board.IsDraw()) return 0;
         bool isEndgame = IsEndgame(board);
-
-        // Define adjustment tables for piece-square tables
         int[][][] adjustmentTables = new int[][][]
         {
         PawnTable, KnightTable, BishopTable, RookTable, QueenTable,
@@ -461,125 +429,18 @@ public class MyBot : IChessBot
         };
 
         int score = 0;
-
-        // Piece evaluation
         foreach (PieceList list in board.GetAllPieceLists())
         {
-            int pieceType = (int)list.TypeOfPieceInList - 1;
-            int[][] table = adjustmentTables[pieceType];
-            int baseVal = PieceValues[pieceType];
-            bool isWhite = list.IsWhitePieceList;
-
+            int baseVal = PieceValues[(int)list.TypeOfPieceInList - 1];
+            int[][] table = adjustmentTables[(int)list.TypeOfPieceInList - 1];
             foreach (Piece p in list)
             {
-                int r = p.Square.Rank;
-                r = isWhite ? 7 - r : r;
-                score += (isWhite ? 1 : -1) * (baseVal + table[r][p.Square.File]);
+                // For white, adjust rank from the bottom; for black, use the rank as-is.
+                int r = p.IsWhite ? 7 - p.Square.Rank : p.Square.Rank;
+                score += (p.IsWhite ? 1 : -1) * (baseVal + table[r][p.Square.File]);
             }
         }
-
-        // Pawn bonuses
-        score += EvaluatePassedPawns(board, true);
-        score -= EvaluatePassedPawns(board, false);
-
-        // Endgame king optimization
-        if (isEndgame)
-        {
-            score += EvaluateKingProximity(board, true);
-            score -= EvaluateKingProximity(board, false);
-        }
-
         return board.IsWhiteToMove ? score : -score;
-    }
-
-    private int EvaluatePassedPawns(Board board, bool isWhite)
-    {
-        int bonus = 0;
-        Span<int> enemyRank = stackalloc int[8];
-        enemyRank.Fill(isWhite ? -1 : 8);
-
-        // Process enemy pawns
-        PieceList enemyPawns = board.GetPieceList(PieceType.Pawn, !isWhite);
-        foreach (Piece p in enemyPawns)
-        {
-            int f = p.Square.File;
-            int r = p.Square.Rank;
-            ref int current = ref enemyRank[f];
-            current = isWhite ? (r > current ? r : current) : (r < current ? r : current);
-        }
-
-        // Process friendly pawns
-        PieceList friendPawns = board.GetPieceList(PieceType.Pawn, isWhite);
-        Square kingSquare = board.GetKingSquare(isWhite);
-        int kFile = kingSquare.File;
-        int kRank = kingSquare.Rank;
-
-        for (int i = 0; i < friendPawns.Count; i++)
-        {
-            Piece p = friendPawns[i];
-            int f = p.Square.File;
-            int r = p.Square.Rank;
-
-            // Adjacent files with boundary checks
-            int left = f > 0 ? enemyRank[f - 1] : (isWhite ? -1 : 8);
-            int center = enemyRank[f];
-            int right = f < 7 ? enemyRank[f + 1] : (isWhite ? -1 : 8);
-
-            bool passed;
-            if (isWhite)
-            {
-                int max = left > center ? left : center;
-                passed = (max > right ? max : right) < r;
-            }
-            else
-            {
-                int min = left < center ? left : center;
-                passed = (min < right ? min : right) > r;
-            }
-
-            if (passed)
-            {
-                // Fast king distance calculation
-                int dFile = Math.Abs(kFile - f);
-                int dRank = Math.Abs(kRank - r);
-                bonus += (isWhite ? r << 4 : (7 - r) << 4) + // Base (r * 16)
-                         (20 - (dFile + dRank) * 5) +         // King proximity
-                         (isWhite ? r * r : (7 - r) * (7 - r)); // Advancement
-
-                // Connected pawns using bitwise checks
-                int connected = 0;
-                if (f > 0 && board.GetPiece(new Square(f - 1, r)).IsPawn) connected++;
-                if (f < 7 && board.GetPiece(new Square(f + 1, r)).IsPawn) connected++;
-                bonus += connected * 30;
-            }
-        }
-
-        return bonus;
-    }
-
-    private int EvaluateKingProximity(Board board, bool isWhite)
-    {
-        Square myKing = board.GetKingSquare(isWhite);
-        Square enemyKing = board.GetKingSquare(!isWhite);
-
-        // Edge detection using bitmask
-        int ekFile = enemyKing.File;
-        int ekRank = enemyKing.Rank;
-        bool onEdge = (ekFile & 7) == 0 || (ekRank & 7) == 0;
-
-        int bonus = 0;
-
-        if (onEdge)
-        {
-            // Distance to corner using bitwise min
-            int fileDist = (ekFile < 4) ? ekFile : 7 - ekFile;
-            int rankDist = (ekRank < 4) ? ekRank : 7 - ekRank;
-            bonus += 50 - (fileDist + rankDist) * 10;
-        }
-
-        // Manhattan distance using direct coordinate math
-        int distance = Math.Abs(myKing.File - ekFile) + Math.Abs(myKing.Rank - ekRank);
-        return bonus + 30 - distance * 5;
     }
 
     private bool IsEndgame(Board board)
@@ -646,12 +507,12 @@ public class MyBot : IChessBot
     private int GetTTIndex(ulong key) => (int)(key & ttMask);
 
     private void AddTT(ulong key, int depth, short score, byte flag, Move bestMove)
-{
-    int index = GetTTIndex(key);
-    var existing = tt[index];
-    if (existing.Key == 0 || depth > existing.Depth || (depth == existing.Depth && flag == EXACT))
-        tt[index] = new TTEntry { Key = key, Depth = (short)depth, Score = score, Flag = flag, BestMove = bestMove };
-}
+    {
+        int index = GetTTIndex(key);
+        var existing = tt[index];
+        if (existing.Key == 0 || depth > existing.Depth || (depth == existing.Depth && flag == EXACT))
+            tt[index] = new TTEntry { Key = key, Depth = (short)depth, Score = score, Flag = flag, BestMove = bestMove };
+    }
 
     // --- Piece Square Tables ---
 
