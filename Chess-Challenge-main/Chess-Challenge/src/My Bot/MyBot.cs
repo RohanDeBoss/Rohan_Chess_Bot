@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v1.9 Aspiration tweaks + Mate checking adjustments
+// v1.9.1 Check Bonus
 public class MyBot : IChessBot
 {
 
@@ -22,6 +22,9 @@ public class MyBot : IChessBot
     private const int KILLER_MOVE_BONUS = 800_000;
     private const int MVV_LVA_MULTIPLIER = 10;
     private const int HISTORY_MAX_BONUS = 700_000;
+
+    // New bonus for moves that give check
+    private const int CHECK_BONUS = 300_000;
 
     // Time Management
     private const int INITIAL_ASPIRATION_WINDOW = 125;
@@ -118,6 +121,13 @@ public class MyBot : IChessBot
             {
                 score += KILLER_MOVE_BONUS;
             }
+
+            // New bonus
+            if (board.IsInCheck())
+            {
+                score += CHECK_BONUS;
+            }
+
             int historyScore = historyMoves[move.StartSquare.Index, move.TargetSquare.Index];
             score += Math.Min(historyScore, HISTORY_MAX_BONUS);
 
@@ -127,6 +137,7 @@ public class MyBot : IChessBot
         Array.Sort(scores, moves, Comparer<int>.Create((a, b) => b.CompareTo(a)));
         return moves;
     }
+
 
     private bool IsKillerMove(Move move, int ply)
     {
