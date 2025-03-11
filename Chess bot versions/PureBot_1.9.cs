@@ -3,13 +3,12 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v1.9.3 Remove check bonus from move ordering
-public class EvilBot : IChessBot
+//PureBot 1.0 A useful testing bot that should never miss tactics up to it's depth searched unless something is broken!
+public class MyBot : IChessBot
 {
-
     // Search Parameters
-    private const bool ConstantDepth = false;
-    private const short MaxDepth = 5;         // Used when ConstantDepth is true
+    private const bool ConstantDepth = true;
+    private const short MaxDepth = 5;
     private const short MaxSafetyDepth = 99;
     private const int InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22;
@@ -22,7 +21,6 @@ public class EvilBot : IChessBot
     private const int KILLER_MOVE_BONUS = 800_000;
     private const int MVV_LVA_MULTIPLIER = 10;
     private const int HISTORY_MAX_BONUS = 700_000;
-    private const int CHECK_BONUS = 300_000;
 
     // Time Management
     private const int INITIAL_ASPIRATION_WINDOW = 125;
@@ -30,14 +28,11 @@ public class EvilBot : IChessBot
     private const int CHECKMATE_SCORE_THRESHOLD = 25000;
     private const int SAFETY_MARGIN = 10;
 
-
-    // --- Static Fields ---
-
+    // Static Fields
     private TTEntry[] tt = new TTEntry[TT_SIZE];
     private readonly ulong ttMask = (ulong)(TT_SIZE - 1);
 
-    // --- Instance Fields ---
-
+    // Instance Fields
     private int negamaxPositions = 0;
     private int qsearchPositions = 0;
     private int bestScore;
@@ -47,8 +42,7 @@ public class EvilBot : IChessBot
     private ulong lastBoardHash;
     private int currentDepth;
 
-    // --- Debugging Methods ---
-
+    // Debugging Methods
     private void DebugLog(string message)
     {
         Console.WriteLine($"{GetType().Name}: {message}");
@@ -56,18 +50,16 @@ public class EvilBot : IChessBot
 
     private string? GetMateInMoves(int score)
     {
-        // Check if the score is in the mate range
-        if (score > InfiniteScore - 1500)  // We're winning with mate
+        if (score > InfiniteScore - 1500)
         {
-            int matePly = (InfiniteScore - score + 49) / 50; // Round up to next ply
+            int matePly = (InfiniteScore - score + 49) / 50;
             return $"Winning Mate in {matePly} ply! :)";
         }
-        else if (score < -InfiniteScore + 1500)  // We're losing to mate
+        else if (score < -InfiniteScore + 1500)
         {
-            int matePly = (InfiniteScore + score + 49) / 50; // Round up to next ply
+            int matePly = (InfiniteScore + score + 49) / 50;
             return $"Losing Mate in {matePly} ply! :(";
         }
-
         return null;
     }
 
@@ -88,7 +80,6 @@ public class EvilBot : IChessBot
             DebugLog($"Total: {negamaxPositions + qsearchPositions:N0}");
         }
     }
-
 
     private Move[] OrderMoves(Move[] moves, Board board, int ply, Move? previousBestMove = null)
     {
@@ -120,7 +111,6 @@ public class EvilBot : IChessBot
                 score += KILLER_MOVE_BONUS;
             }
 
-
             int historyScore = historyMoves[move.StartSquare.Index, move.TargetSquare.Index];
             score += Math.Min(historyScore, HISTORY_MAX_BONUS);
 
@@ -130,7 +120,6 @@ public class EvilBot : IChessBot
         Array.Sort(scores, moves, Comparer<int>.Create((a, b) => b.CompareTo(a)));
         return moves;
     }
-
 
     private bool IsKillerMove(Move move, int ply)
     {
@@ -152,7 +141,7 @@ public class EvilBot : IChessBot
         }
     }
 
-    private const int HISTORY_SCORE_CAP = 1_000_000; // Maximum history score, adjustable
+    private const int HISTORY_SCORE_CAP = 1_000_000;
 
     private void UpdateHistoryMove(Move move, int depth)
     {
@@ -190,7 +179,6 @@ public class EvilBot : IChessBot
 
     public Move Think(Board board, Timer timer)
     {
-        // Reset state between moves
         killerMoves.Clear();
         Array.Clear(historyMoves, 0, historyMoves.Length);
         negamaxPositions = 0;
@@ -203,20 +191,17 @@ public class EvilBot : IChessBot
         var legalMoves = board.GetLegalMoves();
         Move bestMove = legalMoves.Length > 0 ? legalMoves[0] : Move.NullMove;
 
-        // No legal moves => game over
         if (legalMoves.Length == 0)
         {
             bestScore = board.IsInCheck() ? -InfiniteScore + 50 : 0;
             return Move.NullMove;
         }
 
-        // Forced move: only one legal move
         if (legalMoves.Length == 1)
         {
             return HandleForcedMove(legalMoves[0], board, 1, true);
         }
 
-        // Immediate checkmate check
         foreach (Move move in legalMoves)
         {
             if (IsCheckmateMove(move, board))
@@ -230,7 +215,6 @@ public class EvilBot : IChessBot
             ? int.MaxValue
             : (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 4);
 
-        // Iterative deepening loop with MaxSafetyDepth cap
         while (depth <= MaxSafetyDepth &&
                (ConstantDepth && depth <= MaxDepth ||
                 !ConstantDepth && timer.MillisecondsElapsedThisTurn - SAFETY_MARGIN < maxTimeForTurn))
@@ -299,15 +283,13 @@ public class EvilBot : IChessBot
         return bestMove;
     }
 
-    // Call this with realPly = 0 at the root.
     private int Negamax(Board board, int depth, int alpha, int beta, int ply, int realPly)
     {
         negamaxPositions++;
 
-        // Immediate game-ending positions
+        // Handle terminal nodes
         if (board.IsDraw()) return 0;
         if (board.IsInCheckmate())
-            // Use realPly here so extensions don’t inflate the mate score.
             return -InfiniteScore + realPly * 50;
 
         // Transposition table lookup
@@ -321,65 +303,53 @@ public class EvilBot : IChessBot
             if (ttEntry.Flag == BETA && ttEntry.Score >= beta) return beta;
         }
 
-        // Horizon and quiescence search
-        if (depth <= 0) return Quiescence(board, alpha, beta, ply);
+        // Generate moves once for use in both depth 0 check and main search
+        Move[] moves = board.GetLegalMoves();
 
-        // Compute a standpat evaluation first.
-        int standPat = Evaluate(board);
-
-        // Disable null move pruning when near a mate
-        if (!board.IsInCheck() && depth > 3 && Math.Abs(standPat) < InfiniteScore - 1500)
+        // At depth 0, check for immediate checkmate before quiescence
+        if (depth <= 0)
         {
-            board.ForceSkipTurn();
-            int reduction = Math.Min(3, 1 + depth / 4);
-            int nullScore = -Negamax(board, depth - reduction - 1, -beta, -beta + 1, ply + 1, realPly + 1);
-            board.UndoSkipTurn();
-            if (nullScore >= beta)
-                return beta;
+            foreach (Move move in moves)
+            {
+                board.MakeMove(move);
+                if (board.IsInCheckmate())
+                {
+                    board.UndoMove(move);
+                    // Mate in one move for the side to move
+                    return InfiniteScore - (realPly + 1) * 50;
+                }
+                board.UndoMove(move);
+            }
+            // No immediate mate, proceed to quiescence search
+            return Quiescence(board, alpha, beta, ply);
         }
 
-        Move[] moves = OrderMoves(board.GetLegalMoves(), board, ply);
-
-        // No legal moves -> checkmate (or stalemate, but here we treat as mate)
+        // Check for no legal moves (stalemate or checkmate already handled)
         if (moves.Length == 0) return -InfiniteScore + realPly * 50;
+
+        // Order moves for the main search
+        moves = OrderMoves(moves, board, ply);
 
         int originalAlpha = alpha;
         Move bestMove = Move.NullMove;
         int localBestScore = -InfiniteScore;
-
-        // Mate zone detection
-        bool inMateZone = Math.Abs(standPat) > InfiniteScore - 1000;
 
         for (int i = 0; i < moves.Length; i++)
         {
             Move move = moves[i];
             board.MakeMove(move);
             bool givesCheck = board.IsInCheck();
-
             int newDepth = depth - 1;
-
-            // Extensions for check and mate zone still applied for search quality…
-            if (givesCheck) newDepth += 1;
-            if (inMateZone) newDepth += 1;
-
-            // Late move reduction only when safe
-            bool useLMR = !inMateZone && depth > 2 && i >= 2 && !move.IsCapture &&
-                          !move.IsPromotion && !givesCheck && !board.IsInCheck();
-
-            if (useLMR)
-            {
-                int reduction = (int)(0.5 + Math.Log(depth) * Math.Log(i) / 2.0);
-                newDepth = Math.Max(newDepth - reduction, 1);
-            }
+            if (givesCheck) newDepth += 1; // Optional check extension
 
             int score;
-            // Always increment both ply and realPly by 1.
             if (i == 0)
             {
                 score = -Negamax(board, newDepth, -beta, -alpha, ply + 1, realPly + 1);
             }
             else
             {
+                // Zero-window search for move ordering
                 score = -Negamax(board, newDepth, -alpha - 1, -alpha, ply + 1, realPly + 1);
                 if (score > alpha && score < beta)
                     score = -Negamax(board, newDepth, -beta, -alpha, ply + 1, realPly + 1);
@@ -430,15 +400,14 @@ public class EvilBot : IChessBot
         return alpha;
     }
 
-
     private int Evaluate(Board board)
     {
         if (board.IsDraw()) return 0;
         bool isEndgame = IsEndgame(board);
         int[][][] adjustmentTables = new int[][][]
         {
-        PawnTable, KnightTable, BishopTable, RookTable, QueenTable,
-        isEndgame ? KingEndGame : KingMiddleGame
+            PawnTable, KnightTable, BishopTable, RookTable, QueenTable,
+            isEndgame ? KingEndGame : KingMiddleGame
         };
 
         int score = 0;
@@ -448,7 +417,6 @@ public class EvilBot : IChessBot
             int[][] table = adjustmentTables[(int)list.TypeOfPieceInList - 1];
             foreach (Piece p in list)
             {
-                // For white, adjust rank from the bottom; for black, use the rank as-is.
                 int r = p.IsWhite ? 7 - p.Square.Rank : p.Square.Rank;
                 score += (p.IsWhite ? 1 : -1) * (baseVal + table[r][p.Square.File]);
             }
@@ -468,7 +436,7 @@ public class EvilBot : IChessBot
         return cachedPieceCount <= endgameThreshold;
     }
 
-    private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 }; // Pawn, Knight, Bishop, Rook, Queen, King
+    private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 };
 
     private int GetPieceValue(PieceType pieceType)
     {
@@ -480,8 +448,6 @@ public class EvilBot : IChessBot
         return PieceValues[index];
     }
 
-    // --- Helper Methods ---
-
     private Move HandleForcedMove(Move move, Board board, int forcedDepth, bool isForcedMove, int? overrideScore = null)
     {
         board.MakeMove(move);
@@ -492,7 +458,6 @@ public class EvilBot : IChessBot
         return move;
     }
 
-
     private bool IsCheckmateMove(Move move, Board board)
     {
         board.MakeMove(move);
@@ -500,8 +465,6 @@ public class EvilBot : IChessBot
         board.UndoMove(move);
         return isCheckmate;
     }
-
-    // --- Transposition Table ---
 
     private struct TTEntry
     {
@@ -525,8 +488,6 @@ public class EvilBot : IChessBot
         if (existing.Key == 0 || depth > existing.Depth || (depth == existing.Depth && flag == EXACT))
             tt[index] = new TTEntry { Key = key, Depth = (short)depth, Score = score, Flag = flag, BestMove = bestMove };
     }
-
-    // --- Piece Square Tables ---
 
     private static readonly int[][] PawnTable = {
         new[] {0,  0,  0,  0,  0,  0,  0,  0},
