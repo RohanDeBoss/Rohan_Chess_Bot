@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v1.8.4 Remove frutility pruning
+// v1.8.5 LMR adjustments
 public class MyBot : IChessBot
 {
 
@@ -53,16 +53,21 @@ public class MyBot : IChessBot
         Console.WriteLine($"{GetType().Name}: {message}");
     }
 
+
     private string? GetMateInMoves(int score)
     {
-        if (Math.Abs(score) >= InfiniteScore - 1500)  // Threshold for mate scores
+        // Check if the score is in the mate range
+        if (score > InfiniteScore - 1500)  // We're winning with mate
         {
-            int matePly = (InfiniteScore - Math.Abs(score) + 1) / 50;
-            int mateMoves = (matePly + 1) / 2;  // Convert ply to full moves, rounding up
-            return score > 0
-                ? $"Winning Mate in {matePly} ply! :)"
-                : $"Losing Mate in {matePly} ply! :(";
+            int matePly = (InfiniteScore - score + 49) / 50; // Round up to next ply
+            return $"Winning Mate in {matePly} ply! :)";
         }
+        else if (score < -InfiniteScore + 1500)  // We're losing to mate
+        {
+            int matePly = (InfiniteScore + score + 49) / 50; // Round up to next ply
+            return $"Losing Mate in {matePly} ply! :(";
+        }
+
         return null;
     }
 
@@ -294,8 +299,12 @@ public class MyBot : IChessBot
     private int Negamax(Board board, int depth, int alpha, int beta, int ply)
     {
         negamaxPositions++;
+
+        // Check for immediate game-ending positions
         if (board.IsDraw()) return 0;
         if (board.IsInCheckmate()) return -InfiniteScore + ply * 50;
+
+        // Transposition table lookup
         ulong key = board.ZobristKey;
         int index = GetTTIndex(key);
         TTEntry ttEntry = tt[index];
@@ -305,9 +314,11 @@ public class MyBot : IChessBot
             if (ttEntry.Flag == ALPHA && ttEntry.Score <= alpha) return alpha;
             if (ttEntry.Flag == BETA && ttEntry.Score >= beta) return beta;
         }
+
+        // Check for horizon and go to quiescence search
         if (depth <= 0) return Quiescence(board, alpha, beta, ply);
 
-        // Modified null move pruning condition (only apply if depth > 3):
+        // Null move pruning
         if (!board.IsInCheck() && depth > 3)
         {
             board.ForceSkipTurn();
@@ -319,28 +330,42 @@ public class MyBot : IChessBot
 
         int standPat = Evaluate(board);
         Move[] moves = OrderMoves(board.GetLegalMoves(), board, ply);
+
+        // Handle no legal moves case
+        if (moves.Length == 0) return -InfiniteScore + ply * 50;
+
         int originalAlpha = alpha;
         Move bestMove = Move.NullMove;
         int localBestScore = -InfiniteScore;
+
+        // Detect potential mate situations
+        bool inMateZone = Math.Abs(standPat) > InfiniteScore - 1000;
+
         for (int i = 0; i < moves.Length; i++)
         {
             Move move = moves[i];
             board.MakeMove(move);
             bool givesCheck = board.IsInCheck();
-            board.UndoMove(move);
 
-            // Futility pruning has been removed
-
-            board.MakeMove(move);
             int newDepth = depth - 1;
-            if (givesCheck)
-                newDepth += 1;
-            if (depth > 2 && !move.IsCapture && !move.IsPromotion && !givesCheck)
+
+            // Extensions
+            if (givesCheck) newDepth += 1;
+            if (inMateZone) newDepth += 1;
+
+            // Only use LMR when it's safe
+            bool useLMR = !inMateZone && depth > 2 && i >= 2 && !move.IsCapture &&
+                        !move.IsPromotion && !givesCheck && !board.IsInCheck();
+
+            if (useLMR)
             {
-                int reduction = 1 + (i / 5);
+                int reduction = (int)(0.5 + Math.Log(depth) * Math.Log(i) / 2.0);
                 newDepth = Math.Max(newDepth - reduction, 1);
             }
+
             int score;
+
+            // Principal Variation Search
             if (i == 0)
             {
                 score = -Negamax(board, newDepth, -beta, -alpha, ply + 1);
@@ -348,19 +373,18 @@ public class MyBot : IChessBot
             else
             {
                 score = -Negamax(board, newDepth, -alpha - 1, -alpha, ply + 1);
-                if (score > alpha)
+                if (score > alpha && score < beta)
                     score = -Negamax(board, newDepth, -beta, -alpha, ply + 1);
             }
+
             board.UndoMove(move);
-            if (score <= -InfiniteScore + ply)
-            {
-                newDepth -= 1;
-            }
+
             if (score > localBestScore)
             {
                 localBestScore = score;
                 bestMove = move;
             }
+
             alpha = Math.Max(alpha, score);
             if (alpha >= beta)
             {
@@ -373,6 +397,7 @@ public class MyBot : IChessBot
                 return beta;
             }
         }
+
         byte flag = localBestScore <= originalAlpha ? ALPHA : localBestScore >= beta ? BETA : EXACT;
         AddTT(key, depth, (short)localBestScore, flag, bestMove);
         return localBestScore;

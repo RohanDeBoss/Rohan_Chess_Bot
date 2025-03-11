@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v1.8.3 Small formatting changes
+// v1.8.4 Remove frutility pruning
 public class EvilBot : IChessBot
 {
 
@@ -294,21 +294,17 @@ public class EvilBot : IChessBot
     private int Negamax(Board board, int depth, int alpha, int beta, int ply)
     {
         negamaxPositions++;
-
         if (board.IsDraw()) return 0;
         if (board.IsInCheckmate()) return -InfiniteScore + ply * 50;
-
         ulong key = board.ZobristKey;
         int index = GetTTIndex(key);
         TTEntry ttEntry = tt[index];
-
         if (ttEntry.Key == key && ttEntry.Depth >= depth)
         {
             if (ttEntry.Flag == EXACT) return ttEntry.Score;
             if (ttEntry.Flag == ALPHA && ttEntry.Score <= alpha) return alpha;
             if (ttEntry.Flag == BETA && ttEntry.Score >= beta) return beta;
         }
-
         if (depth <= 0) return Quiescence(board, alpha, beta, ply);
 
         // Modified null move pruning condition (only apply if depth > 3):
@@ -323,11 +319,9 @@ public class EvilBot : IChessBot
 
         int standPat = Evaluate(board);
         Move[] moves = OrderMoves(board.GetLegalMoves(), board, ply);
-
         int originalAlpha = alpha;
         Move bestMove = Move.NullMove;
         int localBestScore = -InfiniteScore;
-
         for (int i = 0; i < moves.Length; i++)
         {
             Move move = moves[i];
@@ -335,25 +329,17 @@ public class EvilBot : IChessBot
             bool givesCheck = board.IsInCheck();
             board.UndoMove(move);
 
-            // Modified futility pruning (multiplier reduced from 150 to 100):
-            if (depth <= 3 && depth > 1 && !board.IsInCheck() && !givesCheck && !move.IsCapture && !move.IsPromotion &&
-                standPat + 100 * depth < alpha)
-            {
-                continue;
-            }
+            // Futility pruning has been removed
 
             board.MakeMove(move);
             int newDepth = depth - 1;
-
             if (givesCheck)
                 newDepth += 1;
-
             if (depth > 2 && !move.IsCapture && !move.IsPromotion && !givesCheck)
             {
                 int reduction = 1 + (i / 5);
                 newDepth = Math.Max(newDepth - reduction, 1);
             }
-
             int score;
             if (i == 0)
             {
@@ -366,18 +352,15 @@ public class EvilBot : IChessBot
                     score = -Negamax(board, newDepth, -beta, -alpha, ply + 1);
             }
             board.UndoMove(move);
-
             if (score <= -InfiniteScore + ply)
             {
                 newDepth -= 1;
             }
-
             if (score > localBestScore)
             {
                 localBestScore = score;
                 bestMove = move;
             }
-
             alpha = Math.Max(alpha, score);
             if (alpha >= beta)
             {
@@ -390,7 +373,6 @@ public class EvilBot : IChessBot
                 return beta;
             }
         }
-
         byte flag = localBestScore <= originalAlpha ? ALPHA : localBestScore >= beta ? BETA : EXACT;
         AddTT(key, depth, (short)localBestScore, flag, bestMove);
         return localBestScore;
@@ -487,7 +469,6 @@ public class EvilBot : IChessBot
         board.UndoMove(move);
         return isCheckmate;
     }
-
 
     // --- Transposition Table ---
 
