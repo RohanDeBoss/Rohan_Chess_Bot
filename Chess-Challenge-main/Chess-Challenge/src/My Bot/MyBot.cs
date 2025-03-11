@@ -3,7 +3,8 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v1.9.1 Check Bonus
+// v1.9.2 Disable NMP when mate detected
+
 public class MyBot : IChessBot
 {
 
@@ -22,8 +23,6 @@ public class MyBot : IChessBot
     private const int KILLER_MOVE_BONUS = 800_000;
     private const int MVV_LVA_MULTIPLIER = 10;
     private const int HISTORY_MAX_BONUS = 700_000;
-
-    // New bonus for moves that give check
     private const int CHECK_BONUS = 300_000;
 
     // Time Management
@@ -331,17 +330,20 @@ public class MyBot : IChessBot
         // Horizon and quiescence search
         if (depth <= 0) return Quiescence(board, alpha, beta, ply);
 
-        // Null move pruning
-        if (!board.IsInCheck() && depth > 3)
+        // Compute a standpat evaluation first.
+        int standPat = Evaluate(board);
+
+        // Disable null move pruning when near a mate
+        if (!board.IsInCheck() && depth > 3 && Math.Abs(standPat) < InfiniteScore - 1500)
         {
             board.ForceSkipTurn();
             int reduction = Math.Min(3, 1 + depth / 4);
             int nullScore = -Negamax(board, depth - reduction - 1, -beta, -beta + 1, ply + 1, realPly + 1);
             board.UndoSkipTurn();
-            if (nullScore >= beta) return beta;
+            if (nullScore >= beta)
+                return beta;
         }
 
-        int standPat = Evaluate(board);
         Move[] moves = OrderMoves(board.GetLegalMoves(), board, ply);
 
         // No legal moves -> checkmate (or stalemate, but here we treat as mate)
