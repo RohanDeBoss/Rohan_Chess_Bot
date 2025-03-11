@@ -50,15 +50,14 @@ public class MyBot : IChessBot
 
     private string? GetMateInMoves(int score)
     {
-        // Check if the score is in the mate range
-        if (score > InfiniteScore - 1500)  // We're winning with mate
+        if (score > InfiniteScore - 1500)
         {
-            int matePly = (InfiniteScore - score + 49) / 50; // Round up to next ply
+            int matePly = (InfiniteScore - score + 49) / 50;
             return $"Winning Mate in {matePly} ply! :)";
         }
-        else if (score < -InfiniteScore + 1500)  // We're losing to mate
+        else if (score < -InfiniteScore + 1500)
         {
-            int matePly = (InfiniteScore + score + 49) / 50; // Round up to next ply
+            int matePly = (InfiniteScore + score + 49) / 50;
             return $"Losing Mate in {matePly} ply! :(";
         }
         return null;
@@ -142,7 +141,7 @@ public class MyBot : IChessBot
         }
     }
 
-    private const int HISTORY_SCORE_CAP = 1_000_000; // Maximum history score, adjustable
+    private const int HISTORY_SCORE_CAP = 1_000_000;
 
     private void UpdateHistoryMove(Move move, int depth)
     {
@@ -192,20 +191,17 @@ public class MyBot : IChessBot
         var legalMoves = board.GetLegalMoves();
         Move bestMove = legalMoves.Length > 0 ? legalMoves[0] : Move.NullMove;
 
-        // No legal moves => game over
         if (legalMoves.Length == 0)
         {
             bestScore = board.IsInCheck() ? -InfiniteScore + 50 : 0;
             return Move.NullMove;
         }
 
-        // Forced move: only one legal move
         if (legalMoves.Length == 1)
         {
             return HandleForcedMove(legalMoves[0], board, 1, true);
         }
 
-        // Immediate checkmate check
         foreach (Move move in legalMoves)
         {
             if (IsCheckmateMove(move, board))
@@ -219,7 +215,6 @@ public class MyBot : IChessBot
             ? int.MaxValue
             : (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 4);
 
-        // Iterative deepening loop with MaxSafetyDepth cap
         while (depth <= MaxSafetyDepth &&
                (ConstantDepth && depth <= MaxDepth ||
                 !ConstantDepth && timer.MillisecondsElapsedThisTurn - SAFETY_MARGIN < maxTimeForTurn))
@@ -288,18 +283,14 @@ public class MyBot : IChessBot
         return bestMove;
     }
 
-    // Call this with realPly = 0 at the root.
     private int Negamax(Board board, int depth, int alpha, int beta, int ply, int realPly)
     {
         negamaxPositions++;
 
-        // Immediate game-ending positions
         if (board.IsDraw()) return 0;
         if (board.IsInCheckmate())
-            // Use realPly here so extensions don’t inflate the mate score.
             return -InfiniteScore + realPly * 50;
 
-        // Transposition table lookup
         ulong key = board.ZobristKey;
         int index = GetTTIndex(key);
         TTEntry ttEntry = tt[index];

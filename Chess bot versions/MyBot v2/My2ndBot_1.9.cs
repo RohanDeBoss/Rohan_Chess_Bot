@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v1.9.2 Disable NMP when mate detected
+// v1.9.3 Remove check bonus from move ordering
 
 public class MyBot : IChessBot
 {
@@ -23,7 +23,6 @@ public class MyBot : IChessBot
     private const int KILLER_MOVE_BONUS = 800_000;
     private const int MVV_LVA_MULTIPLIER = 10;
     private const int HISTORY_MAX_BONUS = 700_000;
-    private const int CHECK_BONUS = 300_000;
 
     // Time Management
     private const int INITIAL_ASPIRATION_WINDOW = 125;
@@ -119,12 +118,6 @@ public class MyBot : IChessBot
             if (IsKillerMove(move, ply))
             {
                 score += KILLER_MOVE_BONUS;
-            }
-
-            // New bonus
-            if (board.IsInCheck())
-            {
-                score += CHECK_BONUS;
             }
 
             int historyScore = historyMoves[move.StartSquare.Index, move.TargetSquare.Index];
