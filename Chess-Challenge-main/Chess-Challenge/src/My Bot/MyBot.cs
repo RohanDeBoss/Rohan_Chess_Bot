@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v2.0: Smarter quiescence checks and tactical extensions.
+// v2.0.1: Tweaks to aspiration and MVV_MULTIPLIER
 public class MyBot : IChessBot
 {
     // Search Parameters
@@ -19,11 +19,11 @@ public class MyBot : IChessBot
     private const int CAPTURE_BASE_BONUS = 1_000_000;
     private const int PROMOTION_BASE_BONUS = 900_000;
     private const int KILLER_MOVE_BONUS = 800_000;
-    private const int MVV_LVA_MULTIPLIER = 10;
+    private const int MVV_LVA_MULTIPLIER = 8;
     private const int HISTORY_MAX_BONUS = 700_000;
 
     // Time Management
-    private const int INITIAL_ASPIRATION_WINDOW = 125;
+    private const int INITIAL_ASPIRATION_WINDOW = 150;
     private const int MAX_ASPIRATION_DEPTH = 3;
     private const int CHECKMATE_SCORE_THRESHOLD = 25000;
     private const int SAFETY_MARGIN = 10;

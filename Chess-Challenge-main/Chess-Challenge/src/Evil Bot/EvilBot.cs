@@ -9,7 +9,7 @@ public class EvilBot : IChessBot
 
     // Search Parameters
     private const bool ConstantDepth = false;
-    private const short MaxDepth = 5;         // Used when ConstantDepth is true
+    private const short MaxDepth = 6;         // Used when ConstantDepth is true
     private const short MaxSafetyDepth = 99;
     private const int InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22;
@@ -22,7 +22,6 @@ public class EvilBot : IChessBot
     private const int KILLER_MOVE_BONUS = 800_000;
     private const int MVV_LVA_MULTIPLIER = 10;
     private const int HISTORY_MAX_BONUS = 700_000;
-    private const int CHECK_BONUS = 300_000;
 
     // Time Management
     private const int INITIAL_ASPIRATION_WINDOW = 125;
@@ -119,7 +118,6 @@ public class EvilBot : IChessBot
             {
                 score += KILLER_MOVE_BONUS;
             }
-
 
             int historyScore = historyMoves[move.StartSquare.Index, move.TargetSquare.Index];
             score += Math.Min(historyScore, HISTORY_MAX_BONUS);
@@ -409,6 +407,8 @@ public class EvilBot : IChessBot
         AddTT(key, depth, (short)localBestScore, flag, bestMove);
         return localBestScore;
     }
+
+
 
     private int Quiescence(Board board, int alpha, int beta, int ply)
     {

@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v2.0: Smarter quiescence checks and tactical extensions.
+// v2.0.1: Tweaks to aspiration and MVV_MULTIPLIER
 public class MyBot : IChessBot
 {
     // Search Parameters
@@ -19,11 +19,11 @@ public class MyBot : IChessBot
     private const int CAPTURE_BASE_BONUS = 1_000_000;
     private const int PROMOTION_BASE_BONUS = 900_000;
     private const int KILLER_MOVE_BONUS = 800_000;
-    private const int MVV_LVA_MULTIPLIER = 10;
+    private const int MVV_LVA_MULTIPLIER = 8;
     private const int HISTORY_MAX_BONUS = 700_000;
 
     // Time Management
-    private const int INITIAL_ASPIRATION_WINDOW = 125;
+    private const int INITIAL_ASPIRATION_WINDOW = 150;
     private const int MAX_ASPIRATION_DEPTH = 3;
     private const int CHECKMATE_SCORE_THRESHOLD = 25000;
     private const int SAFETY_MARGIN = 10;
@@ -50,14 +50,15 @@ public class MyBot : IChessBot
 
     private string? GetMateInMoves(int score)
     {
-        if (score > InfiniteScore - 1500)
+        // Check if the score is in the mate range
+        if (score > InfiniteScore - 1500)  // We're winning with mate
         {
-            int matePly = (InfiniteScore - score + 49) / 50;
+            int matePly = (InfiniteScore - score + 49) / 50; // Round up to next ply
             return $"Winning Mate in {matePly} ply! :)";
         }
-        else if (score < -InfiniteScore + 1500)
+        else if (score < -InfiniteScore + 1500)  // We're losing to mate
         {
-            int matePly = (InfiniteScore + score + 49) / 50;
+            int matePly = (InfiniteScore + score + 49) / 50; // Round up to next ply
             return $"Losing Mate in {matePly} ply! :(";
         }
         return null;
@@ -141,7 +142,7 @@ public class MyBot : IChessBot
         }
     }
 
-    private const int HISTORY_SCORE_CAP = 1_000_000;
+    private const int HISTORY_SCORE_CAP = 1_000_000; // Maximum history score, adjustable
 
     private void UpdateHistoryMove(Move move, int depth)
     {
@@ -191,17 +192,20 @@ public class MyBot : IChessBot
         var legalMoves = board.GetLegalMoves();
         Move bestMove = legalMoves.Length > 0 ? legalMoves[0] : Move.NullMove;
 
+        // No legal moves => game over
         if (legalMoves.Length == 0)
         {
             bestScore = board.IsInCheck() ? -InfiniteScore + 50 : 0;
             return Move.NullMove;
         }
 
+        // Forced move: only one legal move
         if (legalMoves.Length == 1)
         {
             return HandleForcedMove(legalMoves[0], board, 1, true);
         }
 
+        // Immediate checkmate check
         foreach (Move move in legalMoves)
         {
             if (IsCheckmateMove(move, board))
@@ -215,6 +219,7 @@ public class MyBot : IChessBot
             ? int.MaxValue
             : (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 4);
 
+        // Iterative deepening loop with MaxSafetyDepth cap
         while (depth <= MaxSafetyDepth &&
                (ConstantDepth && depth <= MaxDepth ||
                 !ConstantDepth && timer.MillisecondsElapsedThisTurn - SAFETY_MARGIN < maxTimeForTurn))
@@ -283,14 +288,18 @@ public class MyBot : IChessBot
         return bestMove;
     }
 
+    // Call this with realPly = 0 at the root.
     private int Negamax(Board board, int depth, int alpha, int beta, int ply, int realPly)
     {
         negamaxPositions++;
 
+        // Immediate game-ending positions
         if (board.IsDraw()) return 0;
         if (board.IsInCheckmate())
+            // Use realPly here so extensions don’t inflate the mate score.
             return -InfiniteScore + realPly * 50;
 
+        // Transposition table lookup
         ulong key = board.ZobristKey;
         int index = GetTTIndex(key);
         TTEntry ttEntry = tt[index];
