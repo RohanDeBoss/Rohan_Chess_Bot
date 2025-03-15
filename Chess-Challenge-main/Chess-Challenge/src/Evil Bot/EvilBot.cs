@@ -3,12 +3,13 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v2.0.4.2: Testing
+
+// v2.1.2 Move ordering tweaks
 public class EvilBot : IChessBot
 {
     // Search Parameters
     private const bool ConstantDepth = false;
-    private const short MaxDepth = 5;         // Used when ConstantDepth is true
+    private const short MaxDepth = 10;         // Used when ConstantDepth is true
     private const short MaxSafetyDepth = 99;
     private const int InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22;
@@ -31,6 +32,7 @@ public class EvilBot : IChessBot
     // Static Fields
     private TTEntry[] tt = new TTEntry[TT_SIZE];
     private readonly ulong ttMask = (ulong)(TT_SIZE - 1);
+    private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 };
 
     // Instance Fields
     private int negamaxPositions = 0;
@@ -47,6 +49,7 @@ public class EvilBot : IChessBot
     {
         Console.WriteLine($"{GetType().Name}: {message}");
     }
+
 
     private string? GetMateInMoves(int score)
     {
@@ -89,28 +92,28 @@ public class EvilBot : IChessBot
 
         for (int i = 0; i < moves.Length; i++)
         {
-            int score = 0;
             Move move = moves[i];
+            int score = 0;
 
             if (move == ttEntry.BestMove)
                 score += TT_MOVE_BONUS;
             if (previousBestMove.HasValue && move == previousBestMove.Value)
                 score += PREVIOUS_BEST_MOVE_BONUS;
+
             if (move.IsCapture)
             {
-                var capturedPiece = board.GetPiece(move.TargetSquare);
-                int capturedValue = GetPieceValue(capturedPiece.PieceType);
-                int attackerValue = GetPieceValue(board.GetPiece(move.StartSquare).PieceType);
+                Piece capturedPiece = board.GetPiece(move.TargetSquare);
+                int capturedIdx = (int)capturedPiece.PieceType - 1;
+                int capturedValue = capturedIdx >= 0 ? PieceValues[capturedIdx] : 0; // Handle None
+                int attackerValue = PieceValues[(int)board.GetPiece(move.StartSquare).PieceType - 1];
                 score += CAPTURE_BASE_BONUS + capturedValue * MVV_LVA_MULTIPLIER - attackerValue;
             }
+
             if (move.IsPromotion)
-            {
-                score += PROMOTION_BASE_BONUS + GetPieceValue(move.PromotionPieceType);
-            }
+                score += PROMOTION_BASE_BONUS + PieceValues[(int)move.PromotionPieceType - 1];
+
             if (IsKillerMove(move, ply))
-            {
                 score += KILLER_MOVE_BONUS;
-            }
 
             int historyScore = historyMoves[move.StartSquare.Index, move.TargetSquare.Index];
             score += Math.Min(historyScore, HISTORY_MAX_BONUS);
@@ -298,6 +301,10 @@ public class EvilBot : IChessBot
             // Use realPly here so extensions don’t inflate the mate score.
             return -InfiniteScore + realPly * 50;
 
+        int mateScore = InfiniteScore - realPly * 50;
+        if (alpha >= mateScore) return alpha;
+        if (beta <= -mateScore) return beta;
+
         // Transposition table lookup
         ulong key = board.ZobristKey;
         int index = GetTTIndex(key);
@@ -359,7 +366,9 @@ public class EvilBot : IChessBot
             bool givesCheck = board.IsInCheck();
 
             int newDepth = depth - 1;
-            if (givesCheck) newDepth += 1; // Keep only this extension
+
+            if (givesCheck && depth < 5) newDepth += 1; // Extend only at shallow depths
+
             if (inMateZone) newDepth += 1;
 
             bool useLMR = !inMateZone && depth > 2 && i >= 2 && !move.IsCapture &&
@@ -493,6 +502,8 @@ public class EvilBot : IChessBot
         return board.IsWhiteToMove ? score : -score;
     }
 
+    //-- Helper methods --
+
     private bool IsEndgame(Board board)
     {
         ulong currentBoardHash = board.ZobristKey;
@@ -504,8 +515,6 @@ public class EvilBot : IChessBot
         const int endgameThreshold = 12;
         return cachedPieceCount <= endgameThreshold;
     }
-
-    private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 };
 
     private int GetPieceValue(PieceType pieceType)
     {
