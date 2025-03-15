@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v2.0.1: Tweaks to aspiration and MVV_MULTIPLIER
+// v2.1: Testing, mate distance pruning
 public class MyBot : IChessBot
 {
     // Search Parameters
@@ -19,7 +19,7 @@ public class MyBot : IChessBot
     private const int CAPTURE_BASE_BONUS = 1_000_000;
     private const int PROMOTION_BASE_BONUS = 900_000;
     private const int KILLER_MOVE_BONUS = 800_000;
-    private const int MVV_LVA_MULTIPLIER = 8;
+    private const int MVV_LVA_MULTIPLIER = 5;
     private const int HISTORY_MAX_BONUS = 700_000;
 
     // Time Management
@@ -288,7 +288,6 @@ public class MyBot : IChessBot
         return bestMove;
     }
 
-    // Call this with realPly = 0 at the root.
     private int Negamax(Board board, int depth, int alpha, int beta, int ply, int realPly)
     {
         negamaxPositions++;
@@ -298,6 +297,10 @@ public class MyBot : IChessBot
         if (board.IsInCheckmate())
             // Use realPly here so extensions don’t inflate the mate score.
             return -InfiniteScore + realPly * 50;
+
+        int mateScore = InfiniteScore - realPly * 50;
+        if (alpha >= mateScore) return alpha;
+        if (beta <= -mateScore) return beta;
 
         // Transposition table lookup
         ulong key = board.ZobristKey;
@@ -310,11 +313,25 @@ public class MyBot : IChessBot
             if (ttEntry.Flag == BETA && ttEntry.Score >= beta) return beta;
         }
 
+        // Get legal moves once and reuse
+        Move[] moves = board.GetLegalMoves();
+
+        // Check for terminal positions before quiescence or deeper search
         if (depth <= 0)
-            return Quiescence(board, alpha, beta, ply, 0); // Reverted, pass qDepth = 0
+        {
+            if (moves.Length == 0)
+            {
+                if (board.IsInCheck())
+                    return -InfiniteScore + realPly * 50;  // Checkmate
+                else
+                    return 0;  // Stalemate
+            }
+            return Quiescence(board, alpha, beta, ply, 0); // Pass qDepth = 0
+        }
 
         int standPat = Evaluate(board);
 
+        //Null move pruning
         if (!board.IsInCheck() && depth > 3 && Math.Abs(standPat) < InfiniteScore - 1500)
         {
             board.ForceSkipTurn();
@@ -325,7 +342,10 @@ public class MyBot : IChessBot
                 return beta;
         }
 
-        Move[] moves = board.GetLegalMoves();
+        // Razor prune at depth 1 only
+        if (depth == 1 && !board.IsInCheck() && standPat + 400 < alpha && moves.Length < 15)
+            return Quiescence(board, alpha, beta, ply, 0);
+
         if (moves.Length == 0) return -InfiniteScore + realPly * 50;
 
         moves = OrderMoves(moves, board, ply);
