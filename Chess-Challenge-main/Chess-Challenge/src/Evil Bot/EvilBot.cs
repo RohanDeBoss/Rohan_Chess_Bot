@@ -4,12 +4,12 @@ using System.Collections.Generic;
 using System.Numerics;
 
 
-// v2.2 Move ordering changes + timer fix
+// v2.3 Evaluate king proximity in endgames
 public class EvilBot : IChessBot
 {
     // Search Parameters
     private const bool ConstantDepth = false;
-    private const short MaxDepth = 10; // Used when ConstantDepth is true
+    private const short MaxDepth = 7; // Used when ConstantDepth is true
     private const short MaxSafetyDepth = 99;
     private const int InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22;
@@ -461,27 +461,55 @@ public class EvilBot : IChessBot
     private int Evaluate(Board board)
     {
         if (board.IsDraw()) return 0;
+
+        // Get king positions efficiently
+        Square whiteKingSquare = board.GetKingSquare(true);
+        Square blackKingSquare = board.GetKingSquare(false);
+
         bool isEndgame = IsEndgame(board);
         int[][][] adjustmentTables = new int[][][]
         {
-            PawnTable, KnightTable, BishopTable, RookTable, QueenTable,
-            isEndgame ? KingEndGame : KingMiddleGame
+        PawnTable, KnightTable, BishopTable, RookTable, QueenTable,
+        isEndgame ? KingEndGame : KingMiddleGame
         };
 
         int score = 0;
+
+        // Material and piece-square table evaluation
         foreach (PieceList list in board.GetAllPieceLists())
         {
-            int baseVal = PieceValues[(int)list.TypeOfPieceInList - 1];
-            int[][] table = adjustmentTables[(int)list.TypeOfPieceInList - 1];
+            int pieceTypeIndex = (int)list.TypeOfPieceInList - 1;
+            int baseVal = PieceValues[pieceTypeIndex];
+            int[][] table = adjustmentTables[pieceTypeIndex];
+
             foreach (Piece p in list)
             {
                 int r = p.IsWhite ? 7 - p.Square.Rank : p.Square.Rank;
                 score += (p.IsWhite ? 1 : -1) * (baseVal + table[r][p.Square.File]);
             }
         }
+
+        // Add king proximity bonus in endgames when winning significantly
+        if (isEndgame && Math.Abs(score) > 300)
+        {
+            // Calculate Manhattan distance between kings
+            int fileDistance = Math.Abs(whiteKingSquare.File - blackKingSquare.File);
+            int rankDistance = Math.Abs(whiteKingSquare.Rank - blackKingSquare.Rank);
+            int kingDistance = fileDistance + rankDistance;
+
+            // Convert distance to a bonus (smaller distance = larger bonus)
+            int proximityBonus = (14 - kingDistance) * 4;
+
+            // Apply bonus based on which side is winning
+            if (score > 0)  // White is winning
+                score += proximityBonus;
+            else if (score < 0)  // Black is winning
+                score -= proximityBonus;
+        }
+
+        // Adjust score for the current side's perspective once
         return board.IsWhiteToMove ? score : -score;
     }
-
 
     //-- Helper methods --
     private bool IsKillerMove(Move move, int ply)
@@ -540,7 +568,7 @@ public class EvilBot : IChessBot
             cachedPieceCount = BitOperations.PopCount(board.AllPiecesBitboard);
             lastBoardHash = currentBoardHash;
         }
-        const int endgameThreshold = 12;
+        const int endgameThreshold = 11;
         return cachedPieceCount <= endgameThreshold;
     }
 
@@ -655,13 +683,13 @@ public class EvilBot : IChessBot
     };
 
     private static readonly int[][] KingEndGame = {
-        new[] {-50,-40,-30,-20,-20,-30,-40,-50},
-        new[] {-30,-20,-10,  0,  0,-10,-20,-30},
-        new[] {-30,-10, 20, 30, 30, 20,-10,-30},
-        new[] {-30,-10, 30, 40, 40, 30,-10,-30},
-        new[] {-30,-10, 30, 40, 40, 30,-10,-30},
-        new[] {-30,-10, 20, 30, 30, 20,-10,-30},
-        new[] {-30,-30,  0,  0,  0,  0,-30,-30},
-        new[] {-50,-30,-30,-30,-30,-30,-30,-50}
+        new[] {-30,-25,-20,-15,-15,-20,-25,-30},
+        new[] {-20,-15,-10,-5, -5, -10,-15,-20},
+        new[] {-20,-10, 10, 15, 15, 15,-10,-20},
+        new[] {-20,-10, 15, 18, 18, 15,-10,-20},
+        new[] {-20,-10, 15, 18, 18, 15,-10,-20},
+        new[] {-20,-10, 15, 20, 15, 15,-10,-20},
+        new[] {-20,-15,-10,  0,  0,-10,-10,-20},
+        new[] {-30,-20,-20,-20,-20,-20,-20,-30}
     };
 }
