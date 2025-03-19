@@ -4,7 +4,8 @@ using System.Collections.Generic;
 using System.Numerics;
 
 
-// v2.4.1 Time management formula (very tweaked) + LMR improved + Tempo added
+// v2.4.2 Replace board.GetLegalMoves() with board.GetLegalMoves(true)
+
 public class EvilBot : IChessBot
 {
     // Search Parameters
@@ -424,7 +425,7 @@ public class EvilBot : IChessBot
         if (standPat >= beta) return beta;
         if (standPat > alpha) alpha = standPat;
 
-        Move[] allMoves = board.GetLegalMoves();
+        Move[] allMoves = board.GetLegalMoves(true);
         List<Move> captureMoves = new List<Move>();
         List<Move> checkMoves = new List<Move>();
 
