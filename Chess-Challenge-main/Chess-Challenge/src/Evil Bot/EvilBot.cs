@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Numerics;
 
 
-// v2.5.1 Pawn closer to promotion bonus
+// v2.4.1 Time management formula (very tweaked) + LMR improved + Tempo added
 public class EvilBot : IChessBot
 {
     // Search Parameters
@@ -532,6 +532,10 @@ public class EvilBot : IChessBot
             else if (score < 0)  // Black is winning
                 score -= proximityBonus;
         }
+
+        // Add tempo bonus for the side to move
+        int tempoBonus = 10;
+        score += board.IsWhiteToMove ? tempoBonus : -tempoBonus;
 
         // Adjust score for the current side's perspective once
         return board.IsWhiteToMove ? score : -score;

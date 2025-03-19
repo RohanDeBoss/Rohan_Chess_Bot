@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Numerics;
 
 
-// v2.4 Time management formula (very tweaked) + LMR improved
+// v2.4.1 Time management formula (very tweaked) + LMR improved + Tempo added
 public class MyBot : IChessBot
 {
     // Search Parameters
@@ -281,12 +281,12 @@ public class MyBot : IChessBot
     {
         negamaxPositions++;
 
-        // Immediate game-ending positions
+        // Handle draws and checkmates immediately
         if (board.IsDraw()) return 0;
         if (board.IsInCheckmate())
-            // Use realPly here so extensions don’t inflate the mate score.
             return -InfiniteScore + realPly * 50;
 
+        // Mate score bounds
         int mateScore = InfiniteScore - realPly * 50;
         if (alpha >= mateScore) return alpha;
         if (beta <= -mateScore) return beta;
@@ -302,10 +302,10 @@ public class MyBot : IChessBot
             if (ttEntry.Flag == BETA && ttEntry.Score >= beta) return beta;
         }
 
-        // Get legal moves once and reuse
+        // Get legal moves once
         Move[] moves = board.GetLegalMoves();
 
-        // Check for terminal positions before quiescence or deeper search
+        // At depth 0, handle terminal cases or quiescence
         if (depth <= 0)
         {
             if (moves.Length == 0)
@@ -315,12 +315,13 @@ public class MyBot : IChessBot
                 else
                     return 0;  // Stalemate
             }
-            return Quiescence(board, alpha, beta, ply, 0); // Pass qDepth = 0
+            return Quiescence(board, alpha, beta, ply, 0);
         }
 
+        // Static evaluation
         int standPat = Evaluate(board);
 
-        //Null move pruning
+        // Null move pruning (existing optimization)
         if (!board.IsInCheck() && depth > 3 && Math.Abs(standPat) < InfiniteScore - 1500)
         {
             board.ForceSkipTurn();
@@ -331,19 +332,27 @@ public class MyBot : IChessBot
                 return beta;
         }
 
-        // Razor prune at depth 1 only
+        // Razor pruning (existing optimization)
         if (depth == 1 && !board.IsInCheck() && standPat + 400 < alpha && moves.Length < 15)
             return Quiescence(board, alpha, beta, ply, 0);
 
+        // Conservative Futility, Prune quiet moves at low depths if they’re unlikely to beat alpha
+        bool inMateZone = Math.Abs(standPat) > InfiniteScore - 1000;
+        if (depth <= 3 && !board.IsInCheck() && moves.Length > 0 && !inMateZone)
+        {
+            int futilityMargin = depth * 100; // Margin: 100 at depth 1, 200 at depth 2, 300 at depth 3
+            if (standPat + futilityMargin <= alpha)
+                return Quiescence(board, alpha, beta, ply, 0); // Skip to quiescence search
+        }
+
+        // No moves means checkmate
         if (moves.Length == 0) return -InfiniteScore + realPly * 50;
 
+        // Order moves and search them
         moves = OrderMoves(moves, board, ply);
-
         int originalAlpha = alpha;
         Move bestMove = Move.NullMove;
         int localBestScore = -InfiniteScore;
-
-        bool inMateZone = Math.Abs(standPat) > InfiniteScore - 1000;
 
         for (int i = 0; i < moves.Length; i++)
         {
@@ -353,20 +362,21 @@ public class MyBot : IChessBot
 
             int newDepth = depth - 1;
 
-            if (givesCheck && depth < 5) newDepth += 1; // Extend only at shallow depths
-
+            // Extensions
+            if (givesCheck && depth < 5) newDepth += 1;
             if (inMateZone) newDepth += 1;
 
-            //LMR
+            // Late Move Reductions (LMR)
             bool useLMR = !inMateZone && depth > 2 && i >= 2 && !move.IsCapture && !move.IsPromotion && !givesCheck;
             if (useLMR)
             {
                 int historyScore = historyMoves[move.StartSquare.Index, move.TargetSquare.Index];
                 int reduction = (int)(0.5 + Math.Log(depth) * Math.Log(i + 1) / 2.0);
-                if (historyScore > 5000) reduction = Math.Max(reduction - 1, 1); // Less reduction for good history
+                if (historyScore > 5000) reduction = Math.Max(reduction - 1, 1);
                 newDepth = Math.Max(newDepth - reduction, 1);
             }
 
+            // Search the move
             int score;
             if (i == 0)
             {
@@ -380,6 +390,7 @@ public class MyBot : IChessBot
             }
             board.UndoMove(move);
 
+            // Update best score and move
             if (score > localBestScore)
             {
                 localBestScore = score;
@@ -399,6 +410,7 @@ public class MyBot : IChessBot
             }
         }
 
+        // Store result in transposition table
         byte flag = localBestScore <= originalAlpha ? ALPHA : localBestScore >= beta ? BETA : EXACT;
         AddTT(key, depth, (short)localBestScore, flag, bestMove);
         return localBestScore;
@@ -493,6 +505,13 @@ public class MyBot : IChessBot
             {
                 int r = p.IsWhite ? 7 - p.Square.Rank : p.Square.Rank;
                 score += (p.IsWhite ? 1 : -1) * (baseVal + table[r][p.Square.File]);
+
+                // Add endgame pawn advancement bonus
+                if (isEndgame && p.PieceType == PieceType.Pawn)
+                {
+                    int advancementBonus = p.IsWhite ? p.Square.Rank : (7 - p.Square.Rank);
+                    score += (p.IsWhite ? 1 : -1) * advancementBonus * 5; // Bonus of 5 per rank advanced
+                }
             }
         }
 
@@ -513,6 +532,10 @@ public class MyBot : IChessBot
             else if (score < 0)  // Black is winning
                 score -= proximityBonus;
         }
+
+        // Add tempo bonus for the side to move
+        int tempoBonus = 10;
+        score += board.IsWhiteToMove ? tempoBonus : -tempoBonus;
 
         // Adjust score for the current side's perspective once
         return board.IsWhiteToMove ? score : -score;
