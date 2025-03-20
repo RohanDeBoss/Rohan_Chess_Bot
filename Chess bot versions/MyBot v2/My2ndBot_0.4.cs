@@ -4,21 +4,19 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-//My2ndBot v0.4 TT is now an array, and code is much cleaner!
+//My2ndBot v0.4 Bug fixes, experimental features removed, draws are now 0, time fraction = 28. (Slower but stronger)
 public class MyBot : IChessBot
 {
     private const bool ConstantDepth = true;
-    private const short MaxDepth = 4;
+    private const short MaxDepth = 3;
     private const short InfiniteScore = 30000; //less than 32k so that it fits into short!
     private const int TT_SIZE = 1048576;
-    private const short TimeSpentFractionofTotal = 20;
+    private const short TimeSpentFractionofTotal = 28;
 
     private const byte R = 2;
     private const byte LMR_THRESHOLD = 2;
 
     private int positionsSearched = 0;
-    private int ttHits = 0;
-    private int ttCollisions = 0;
     public int bestScore;
 
     private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 };
@@ -28,13 +26,11 @@ public class MyBot : IChessBot
     {
         Move bestMove = Move.NullMove;
         positionsSearched = 0;
-        ttHits = 0;
-        ttCollisions = 0;
         short safetymaxdepth = 150;
         short depth = 1;
 
         var legalMoves = board.GetLegalMoves();
-        if (legalMoves.Length == 1) return legalMoves[0]; // Return immediately if only one move is possible
+        if (legalMoves.Length == 1) return legalMoves[0]; // Return immediately if only one legal move
 
         // Iterative Deepening with time management when ConstantDepth is false
         int maxTimeForTurn = ConstantDepth ? int.MaxValue :
@@ -64,6 +60,7 @@ public class MyBot : IChessBot
             if (!foundLegalMove || depth >= safetymaxdepth) break; // Exit if no moves were found or depth>=150
             depth++; // Increase depth for the next iteration
         }
+
         if (bestMove == Move.NullMove && legalMoves.Length > 0)
             bestMove = legalMoves[0];
 
@@ -74,41 +71,42 @@ public class MyBot : IChessBot
         Console.WriteLine(" ");
         Console.WriteLine($"MyBot Depth: {depth - 1}");
         Console.WriteLine($"MyBot eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
-        Console.WriteLine($"MyBot Positions searched: {positionsSearched:N0}");
-        Console.WriteLine($"TT Size: {usedEntries:N0} / {TT_SIZE:N0} ({fillPercentage:F2}%)");
-
+        Console.WriteLine($"MyBot Positions: {positionsSearched:N0}");
+        Console.WriteLine($"MyBot TT Size: ({fillPercentage:F2}%)");
         return bestMove;
     }
 
     private int MoveOrdering(Move move, Board board, int ply = 0)
     {
-        int score = 0;
         ulong key = board.ZobristKey;
         int index = (int)(key % TT_SIZE);
 
+        // Prioritize transposition table moves.
         if (tt[index].Key == key && tt[index].BestMove == move)
             return 1000000;
 
-        PieceType capturedPieceType = board.GetPiece(move.TargetSquare).PieceType;
-        if (capturedPieceType != PieceType.None)
+        int score = historyMoves[move.StartSquare.Index, move.TargetSquare.Index];
+
+        // Captures: MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
+        var capturedPiece = board.GetPiece(move.TargetSquare);
+        if (capturedPiece.PieceType != PieceType.None)
         {
-            int attackerValue = GetPieceValue(board.GetPiece(move.StartSquare).PieceType);
-            int victimValue = GetPieceValue(capturedPieceType);
-            score += 100000 + (victimValue * 10 - attackerValue);
+            score += 100000 + GetPieceValue(capturedPiece.PieceType) * 10 -
+                     GetPieceValue(board.GetPiece(move.StartSquare).PieceType);
         }
 
-        if (move == killerMoves[ply * 2] || move == killerMoves[ply * 2 + 1])
-            score += 90000;
-
-        score += historyMoves[move.StartSquare.Index, move.TargetSquare.Index];
-
+        // Promotion moves.
         if (move.IsPromotion)
             score += 80000 + GetPieceValue(move.PromotionPieceType);
+
+        // Killer moves.
+        if (move == killerMoves[ply * 2] || move == killerMoves[ply * 2 + 1])
+            score += 90000;
 
         return score;
     }
 
-    private Move[] killerMoves = new Move[100 * 2];
+    private Move[] killerMoves = new Move[200 * 2];
     private int[,] historyMoves = new int[64, 64];
 
     private void UpdateKillerMoves(Move move, int ply)
@@ -161,16 +159,16 @@ public class MyBot : IChessBot
     private int Negamax(Board board, int depth, int alpha, int beta, int ply)
     {
         positionsSearched++;
+
+        if (board.IsDraw())
+            return 0; //Always 0
         if (board.IsInCheckmate())
             return -InfiniteScore - depth;
-        if (board.IsDraw())
-            return board.IsWhiteToMove ? -40 : 40;
 
         ulong key = board.ZobristKey;
         int index = (int)(key % TT_SIZE);
         if (tt[index].Key == key && tt[index].Depth >= depth)
         {
-            ttHits++;
             if (tt[index].Flag == EXACT) return tt[index].Score;
             if (tt[index].Flag == ALPHA && tt[index].Score <= alpha) return alpha;
             if (tt[index].Flag == BETA && tt[index].Score >= beta) return beta;
@@ -247,6 +245,9 @@ public class MyBot : IChessBot
         int score = 0;
         bool isEndgame = IsEndgame(board);
 
+        if (board.IsDraw())
+            return 0; //Always 0
+
         foreach (PieceList pieceList in board.GetAllPieceLists())
         {
             int pieceValue = GetPieceValue(pieceList.TypeOfPieceInList);
@@ -257,23 +258,27 @@ public class MyBot : IChessBot
                 score += (piece.IsWhite ? 1 : -1) * (adjustmentTable[rank, piece.Square.File] + pieceValue);
             }
         }
+
         return board.IsWhiteToMove ? score : -score;
     }
 
     private int cachedPieceCount = -1;
     private ulong lastBoardHash;
+
     private bool IsEndgame(Board board)
     {
-        ulong currentBoardHash = board.ZobristKey; // Unique identifier for board state
+        ulong currentBoardHash = board.ZobristKey;
 
-        // Update cached piece count only if the board has changed
+        // Update cached data if the board state has changed
         if (currentBoardHash != lastBoardHash)
         {
             cachedPieceCount = BitOperations.PopCount(board.AllPiecesBitboard);
             lastBoardHash = currentBoardHash;
         }
 
-        return cachedPieceCount <= 12; // Threshold can be adjusted as needed
+        // Check if the game is in an endgame phase
+        const int endgameThreshold = 12;
+        return cachedPieceCount <= endgameThreshold;
     }
 
     private int GetPieceValue(PieceType pieceType)
@@ -318,19 +323,19 @@ public class MyBot : IChessBot
     private void AddTT(ulong key, int depth, short score, byte flag, Move bestMove)
     {
         int index = (int)(key % TT_SIZE);
-        if (tt[index].Key != key && tt[index].Key != 0) ttCollisions++;
         if (tt[index].Key == 0 || tt[index].Depth <= depth)
             tt[index] = new TTEntry { Key = key, Depth = (short)depth, Score = score, Flag = flag, BestMove = bestMove };
     }
 
+    //Piece square table bitboards
     private static readonly int[,] PawnTable = {
         {0,  0,  0,  0,  0,  0,  0,  0},
         {50, 50, 50, 50, 50, 50, 50, 50},
-        {10, 10, 20, 30, 30, 20, 10, 10},
+        {12, 10, 20, 30, 30, 20, 11, 10},
         {5,  5, 10, 25, 25, 10,  5,  5},
-        {0,  0,  0, 20, 20,  0,  0,  0},
-        {5, -5,-10,  0,  0,-10, -5,  5},
-        {5, 10, 10,-20,-20, 10, 10,  5},
+        {1,  3 ,  6, 21, 22,  0,  0,  0},
+        {5, -1,-10,  1,  3,-10, -5,  5},
+        {5, 10, 10,-20,-20, 10, 11,  5},
         {0,  0,  0,  0,  0,  0,  0,  0}
     };
 
@@ -357,14 +362,14 @@ public class MyBot : IChessBot
     };
 
     private static readonly int[,] RookTable = {
-        {0,  0,  0,  0,  0,  0,  0,  0},
-        {5, 10, 10, 10, 10, 10, 10,  5},
+        {0,   0,  0,  0,  0,  0,  0,  0},
+        {0,  10, 10, 10, 10, 10, 10,  5},
         {-5,  0,  0,  0,  0,  0,  0, -5},
         {-5,  0,  0,  0,  0,  0,  0, -5},
         {-5,  0,  0,  0,  0,  0,  0, -5},
         {-5,  0,  0,  0,  0,  0,  0, -5},
         {-5,  0,  0,  0,  0,  0,  0, -5},
-        {0,  0,  0,  5,  5,  0,  0,  0}
+        {0,  0,  0,  5,  5,  0,  0,  -4}
     };
 
     private static readonly int[,] QueenTable = {
