@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-//My2ndBot v0.1 Final initial version complete, already better than last bot!
+//My2ndBot v0.1 Inital version complete, with qsearch working! Already stronger that mybot v2.5
 public class MyBot : IChessBot
 {
     private const int MaxDepth = 3;
@@ -68,7 +68,6 @@ public class MyBot : IChessBot
                     break;
                 }
             }
-
 
             // If we're in checkmate or stalemate, stop searching
             if (!foundLegalMove)
@@ -154,13 +153,14 @@ public class MyBot : IChessBot
         if (depth <= 0)
             return Evaluate(board, depth);
 
-        int stand_pat = Evaluate(board, depth);
-        if (stand_pat >= beta)
+        int standPat = Evaluate(board, depth);
+        if (standPat >= beta)
             return beta;
-        if (alpha < stand_pat)
-            alpha = stand_pat;
+        if (alpha < standPat)
+            alpha = standPat;
 
-        foreach (Move move in board.GetLegalMoves(true)) // Only captures
+        // Filter for capture moves
+        foreach (Move move in board.GetLegalMoves().Where(m => m.IsCapture))
         {
             board.MakeMove(move);
             int score = -Quiescence(board, -beta, -alpha, depth - 1);
@@ -173,6 +173,7 @@ public class MyBot : IChessBot
         }
         return alpha;
     }
+
 
     private int Negamax(Board board, int depth, int alpha, int beta)
     {
@@ -304,7 +305,6 @@ public class MyBot : IChessBot
         int pieceCount = BitOperations.PopCount(board.AllPiecesBitboard);
         return pieceCount <= 10; // You can adjust this threshold as needed
     }
-
 
 
     private static readonly int[,] PawnTable = {
