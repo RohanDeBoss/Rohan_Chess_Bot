@@ -4,46 +4,76 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-//My2ndBot v0.6 Bug fixes and experimental features removed draw has to be 0 now!
-public class EvilBot : IChessBot
+//My2ndBot v0.5 Time management, reorganizing code, bug fixes/improvements 
+public class MyBot : IChessBot
 {
-    private const bool ConstantDepth = true;
-    private const short MaxDepth = 3;
-    private const short InfiniteScore = 30000; //less than 32k so that it fits into short!
-    private const int TT_SIZE = 1048576;
-    private const short TimeSpentFractionofTotal = 18;
-
-    private const byte R = 2;
+    // Constants
+    private const bool ConstantDepth = false;
+    private const short MaxDepth = 5;
+    private const short InfiniteScore = 30000; // Less than 32k to fit into short
+    private const int TT_SIZE = 1 << 21; // 2097152 Max size
+    private const short TimeSpentFractionofTotal = 25;
     private const byte LMR_THRESHOLD = 2;
 
-    private int positionsSearched = 0;
-    public int bestScore;
-
+    // Static Fields
     private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 };
     private static TTEntry[] tt = new TTEntry[TT_SIZE];
+
+    // Instance Fields
+    private int positionsSearched = 0;
+    public int bestScore;
+    private Move[] killerMoves = new Move[200 * 2];
+    private int[,] historyMoves = new int[64, 64];
+    private int cachedPieceCount = -1;
+    private ulong lastBoardHash;
+
+    private int GetNullMoveReduction(int depth, bool isEndgame)
+    {
+        return isEndgame ? 3 : 2;
+    }
+    private int GetTTIndex(ulong key) => (int)(key & (TT_SIZE - 1));
+
+    private Move EvalLog(Move moveToReturn, Board board, int depth)
+    {
+        Console.WriteLine(" ");
+        Console.WriteLine($"MyBot Depth: {depth - 1}");
+        Console.WriteLine($"MyBot eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
+        Console.WriteLine($"MyBot Positions: {positionsSearched:N0}");
+        return moveToReturn;
+    }
 
     public Move Think(Board board, Timer timer)
     {
         Move bestMove = Move.NullMove;
         positionsSearched = 0;
-        short safetymaxdepth = 150;
         short depth = 1;
-
+        bestScore = 0;
+        Move previousBestMove = Move.NullMove;
+        short safetymaxdepth = 99;
         var legalMoves = board.GetLegalMoves();
-        if (legalMoves.Length == 1) return legalMoves[0]; // Return immediately if only one legal move
+        if (legalMoves.Length == 1) return EvalLog(legalMoves[0], board, depth);
 
-        // Iterative Deepening with time management when ConstantDepth is false
+        // Time management based on game phase
         int maxTimeForTurn = ConstantDepth ? int.MaxValue :
-            (Math.Min(1000, timer.MillisecondsRemaining / TimeSpentFractionofTotal) + timer.IncrementMilliseconds) / 4;
+        (timer.MillisecondsRemaining / TimeSpentFractionofTotal) + (timer.IncrementMilliseconds / 3);
 
         while ((ConstantDepth && depth <= MaxDepth) || (!ConstantDepth && timer.MillisecondsElapsedThisTurn < maxTimeForTurn))
         {
             bool foundLegalMove = false;
-            var orderedMoves = legalMoves.OrderByDescending(move => MoveOrdering(move, board)).ToList();
+            // Order moves with previous best move first
+            var orderedMoves = new List<Move>();
+            if (previousBestMove != Move.NullMove && legalMoves.Contains(previousBestMove))
+                orderedMoves.Add(previousBestMove);
+            orderedMoves.AddRange(legalMoves.Where(m => m != previousBestMove)
+                .OrderByDescending(move => MoveOrdering(move, board)));
 
             foreach (Move move in orderedMoves)
             {
-                if (IsCheckmateMove(move, board)) return move; // Immediate return on checkmate
+                // Stop searching if we're running low on time
+                if (!ConstantDepth && timer.MillisecondsElapsedThisTurn >= maxTimeForTurn)
+                    return EvalLog(bestMove != Move.NullMove ? bestMove : orderedMoves[0], board, depth);
+
+                if (IsCheckmateMove(move, board)) return EvalLog(move, board, depth);
 
                 board.MakeMove(move);
                 int score = -Negamax(board, depth - 1, -InfiniteScore, InfiniteScore, 1);
@@ -57,29 +87,21 @@ public class EvilBot : IChessBot
                 }
             }
 
-            if (!foundLegalMove || depth >= safetymaxdepth) break; // Exit if no moves were found or depth>=150
-            depth++; // Increase depth for the next iteration
+            previousBestMove = bestMove;
+            depth++;
+            //EvalLog(bestMove, board, depth);
+            if (!foundLegalMove || depth >= safetymaxdepth) break;
         }
 
         if (bestMove == Move.NullMove && legalMoves.Length > 0)
             bestMove = legalMoves[0];
 
-        //TT loop
-        int usedEntries = tt.Count(entry => entry.Key != 0);
-        double fillPercentage = (usedEntries * 100.0) / TT_SIZE;
-
-        Console.WriteLine(" ");
-        Console.WriteLine($"MyBot Depth: {depth - 1}");
-        Console.WriteLine($"MyBot eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
-        Console.WriteLine($"MyBot Positions: {positionsSearched:N0}");
-        Console.WriteLine($"MyBot TT Size: ({fillPercentage:F2}%)");
-        return bestMove;
+        return EvalLog(bestMove, board, depth);
     }
-
     private int MoveOrdering(Move move, Board board, int ply = 0)
     {
         ulong key = board.ZobristKey;
-        int index = (int)(key % TT_SIZE);
+        int index = GetTTIndex(key);
 
         // Prioritize transposition table moves.
         if (tt[index].Key == key && tt[index].BestMove == move)
@@ -105,9 +127,6 @@ public class EvilBot : IChessBot
 
         return score;
     }
-
-    private Move[] killerMoves = new Move[100 * 2];
-    private int[,] historyMoves = new int[64, 64];
 
     private void UpdateKillerMoves(Move move, int ply)
     {
@@ -166,7 +185,8 @@ public class EvilBot : IChessBot
             return -InfiniteScore - depth;
 
         ulong key = board.ZobristKey;
-        int index = (int)(key % TT_SIZE);
+        int index = GetTTIndex(key);
+
         if (tt[index].Key == key && tt[index].Depth >= depth)
         {
             if (tt[index].Flag == EXACT) return tt[index].Score;
@@ -176,10 +196,10 @@ public class EvilBot : IChessBot
 
         if (depth == 0) return Quiescence(board, alpha, beta, 0);
 
-        if (depth > R && !board.IsInCheck())
+        if (depth > GetNullMoveReduction(depth, IsEndgame(board)) && !board.IsInCheck())
         {
             board.ForceSkipTurn();
-            int nullMoveScore = -Negamax(board, depth - R - 1, -beta, -beta + 1, ply + 1);
+            int nullMoveScore = -Negamax(board, depth - GetNullMoveReduction(depth, IsEndgame(board)) - 1, -beta, -beta + 1, ply + 1);
             board.UndoSkipTurn();
             if (nullMoveScore >= beta) return beta;
         }
@@ -224,12 +244,17 @@ public class EvilBot : IChessBot
             alpha = Math.Max(alpha, score);
             if (alpha >= beta)
             {
-                if (move.CapturePieceType == PieceType.None)
+                if (moveCount < 2 && move.CapturePieceType == PieceType.None)
                 {
                     UpdateKillerMoves(move, ply);
+                }
+
+                if (move.CapturePieceType == PieceType.None)
+                {
                     UpdateHistoryMove(move, depth);
                     AddTT(key, depth, (short)beta, BETA, move);
                 }
+
                 return beta;
             }
             moveCount++;
@@ -242,11 +267,10 @@ public class EvilBot : IChessBot
 
     private int Evaluate(Board board, int depth)
     {
+        if (board.IsDraw()) return 0; //Always 0
+
         int score = 0;
         bool isEndgame = IsEndgame(board);
-
-        if (board.IsDraw())
-            return 0; //Always 0
 
         foreach (PieceList pieceList in board.GetAllPieceLists())
         {
@@ -261,9 +285,6 @@ public class EvilBot : IChessBot
 
         return board.IsWhiteToMove ? score : -score;
     }
-
-    private int cachedPieceCount = -1;
-    private ulong lastBoardHash;
 
     private bool IsEndgame(Board board)
     {
@@ -322,7 +343,7 @@ public class EvilBot : IChessBot
 
     private void AddTT(ulong key, int depth, short score, byte flag, Move bestMove)
     {
-        int index = (int)(key % TT_SIZE);
+        int index = GetTTIndex(key);
         if (tt[index].Key == 0 || tt[index].Depth <= depth)
             tt[index] = new TTEntry { Key = key, Depth = (short)depth, Score = score, Flag = flag, BestMove = bestMove };
     }
