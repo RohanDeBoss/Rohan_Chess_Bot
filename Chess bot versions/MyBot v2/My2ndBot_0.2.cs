@@ -4,17 +4,14 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 
-//My2ndBot v0.2 TT Added so a lot faster + bot is now stronger!
+//My2ndBot v0.2 Added lots of features, including a Transposition table, Null move pruning and LMR
 public class MyBot : IChessBot
 {
     private const int MaxDepth = 3;
-    private const int QuiescenceDepthLimit = 5;
     private const int InfiniteScore = 1000000;
-    private const int MaxTTSize = 1000000;
+    private const int MaxTTSize = 1000000 * MaxDepth;
 
     private int positionsSearched = 0;
-    private int ttHits = 0;
-    private int ttCollisions = 0;
     public int bestScore;
     private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 };
 
@@ -25,7 +22,7 @@ public class MyBot : IChessBot
     private class TTEntry
     {
         public ulong Key;
-        public int Depth;
+        public short Depth;
         public int Score;
         public byte Flag;
         public Move BestMove;
@@ -37,14 +34,13 @@ public class MyBot : IChessBot
     {
         if (transpositionTable.ContainsKey(key))
         {
-            ttCollisions++;
             // Only replace if new position was searched to greater or equal depth
             if (transpositionTable[key].Depth <= depth)
             {
                 transpositionTable[key] = new TTEntry
                 {
                     Key = key,
-                    Depth = depth,
+                    Depth = (short)depth,
                     Score = score,
                     Flag = flag,
                     BestMove = bestMove
@@ -63,23 +59,11 @@ public class MyBot : IChessBot
         transpositionTable[key] = new TTEntry
         {
             Key = key,
-            Depth = depth,
+            Depth = (short)depth,
             Score = score,
             Flag = flag,
             BestMove = bestMove
         };
-    }
-
-    private void PrintTTStats()
-    {
-        double fillPercentage = (transpositionTable.Count * 100.0) / MaxTTSize;
-        double hitRate = positionsSearched > 0 ? (ttHits * 100.0) / positionsSearched : 0;
-        double collisionRate = ttCollisions > 0 ? (ttCollisions * 100.0) / transpositionTable.Count : 0;
-
-        Console.WriteLine($"TT Stats:");
-        Console.WriteLine($"  Size: {transpositionTable.Count:N0} / {MaxTTSize:N0} ({fillPercentage:F2}% full)");
-        Console.WriteLine($"  Hits: {ttHits:N0} ({hitRate:F2}% of positions)");
-        Console.WriteLine($"  Collisions: {ttCollisions:N0} ({collisionRate:F2}% of entries)");
     }
 
     public Move Think(Board board, Timer timer)
@@ -88,8 +72,6 @@ public class MyBot : IChessBot
         int depth = 1;
         bestScore = -InfiniteScore;
         positionsSearched = 0;
-        ttHits = 0;
-        ttCollisions = 0;
 
         var legalMoves = board.GetLegalMoves();
         if (legalMoves.Length == 1)
@@ -129,7 +111,6 @@ public class MyBot : IChessBot
         Console.WriteLine($"MyBot Depth: {depth - 1}");
         Console.WriteLine($"MyBot eval: {(board.IsWhiteToMove ? bestScore : -bestScore)}");
         Console.WriteLine($"MyBot Positions searched: {positionsSearched:N0}");
-        PrintTTStats();
 
         return bestMove;
     }
@@ -144,7 +125,7 @@ public class MyBot : IChessBot
 
         // 1. TT moves (highest priority)
         ulong positionKey = board.ZobristKey;
-        if (transpositionTable.TryGetValue(positionKey, out TTEntry ttEntry) &&
+        if (transpositionTable.TryGetValue(positionKey, out TTEntry? ttEntry) &&
             ttEntry.BestMove == move)
         {
             return 1000000;
@@ -219,28 +200,41 @@ public class MyBot : IChessBot
     {
         positionsSearched++;
 
-        if (depth <= 0)
-            return Evaluate(board, depth);
-
+        // Evaluate the position at the current depth
         int stand_pat = Evaluate(board, depth);
+
+        // Beta cut-off
         if (stand_pat >= beta)
             return beta;
+
+        // Update alpha if the stand-pat score is better
         if (alpha < stand_pat)
             alpha = stand_pat;
+
+        // Get capture moves ordered by their potential value
         var captureMoves = board.GetLegalMoves(true).OrderByDescending(move => MoveOrdering(move, board)).ToList();
+
+        // Explore capturing moves
         foreach (Move move in captureMoves)
         {
             board.MakeMove(move);
-            int score = -Quiescence(board, -beta, -alpha, depth - 1);
+            int score = -Quiescence(board, -beta, -alpha, depth - 1); // Recur with reduced depth
             board.UndoMove(move);
 
+            // Beta cut-off
             if (score >= beta)
                 return beta;
+
+            // Update alpha based on the score
             if (score > alpha)
                 alpha = score;
         }
-        return alpha;
+        return alpha; // Return the best score found
     }
+
+
+    private const int R = 2; // Reduction for null move pruning
+    private const int LMR_THRESHOLD = 2;  // Depth threshold to apply LMR
 
     private int Negamax(Board board, int depth, int alpha, int beta, int ply)
     {
@@ -249,13 +243,12 @@ public class MyBot : IChessBot
         if (board.IsInCheckmate() || board.IsDraw())
             return Evaluate(board, depth);
 
-        // Check transposition table
+        // Transposition Table lookup
         ulong positionKey = board.ZobristKey;
-        if (transpositionTable.TryGetValue(positionKey, out TTEntry ttEntry))
+        if (transpositionTable.TryGetValue(positionKey, out TTEntry? ttEntry))
         {
             if (ttEntry.Depth >= depth)
             {
-                ttHits++;
                 if (ttEntry.Flag == EXACT)
                     return ttEntry.Score;
                 if (ttEntry.Flag == ALPHA && ttEntry.Score <= alpha)
@@ -266,17 +259,36 @@ public class MyBot : IChessBot
         }
 
         if (depth == 0)
-            return Quiescence(board, alpha, beta, QuiescenceDepthLimit);
+            return Quiescence(board, alpha, beta, 0);
+
+        // Null Move Pruning
+        if (depth > R && !board.IsInCheck())
+        {
+            board.ForceSkipTurn();
+            int nullMoveScore = -Negamax(board, depth - R - 1, -beta, -beta + 1, ply + 1);
+            board.UndoSkipTurn();
+
+            if (nullMoveScore >= beta)
+                return beta;
+        }
 
         int originalAlpha = alpha;
         Move bestMove = Move.NullMove;
         int bestScore = -InfiniteScore;
         List<Move> moves = board.GetLegalMoves().OrderByDescending(move => MoveOrdering(move, board)).ToList();
 
+        int moveCount = 0;
         foreach (Move move in moves)
         {
             board.MakeMove(move);
-            int score = -Negamax(board, depth - 1, -beta, -alpha, ply + 1);
+
+            // Late Move Reduction check
+            int newDepth = depth - 1;
+            bool canReduce = moveCount >= LMR_THRESHOLD && depth > 2 && !move.IsCapture && !board.IsInCheck();
+            if (canReduce)
+                newDepth--; // Reduce depth for late moves
+
+            int score = -Negamax(board, newDepth, -beta, -alpha, ply + 1);
             board.UndoMove(move);
 
             if (score > bestScore)
@@ -288,14 +300,15 @@ public class MyBot : IChessBot
             alpha = Math.Max(alpha, score);
             if (alpha >= beta)
             {
-                // Update killer moves on beta cutoff
-                UpdateKillerMoves(move, ply);
-                // Update history moves on beta cutoff
-                UpdateHistoryMove(move, depth);
-
-                AddToTranspositionTable(positionKey, depth, beta, BETA, move);
+                if (move.CapturePieceType == PieceType.None)
+                {
+                    UpdateKillerMoves(move, ply);
+                    UpdateHistoryMove(move, depth);
+                    AddToTranspositionTable(positionKey, depth, beta, BETA, move);
+                }
                 return beta;
             }
+            moveCount++;
         }
 
         byte flag = bestScore <= originalAlpha ? ALPHA :
@@ -315,27 +328,22 @@ public class MyBot : IChessBot
 
         int score = 0;
         bool isEndgame = IsEndgame(board);
-        PieceList[] pieceLists = board.GetAllPieceLists();
 
-        foreach (PieceList pieceList in pieceLists)
+        foreach (PieceList pieceList in board.GetAllPieceLists())
         {
             int pieceValue = GetPieceValue(pieceList.TypeOfPieceInList);
             int[,] adjustmentTable = GetAdjustmentTable(pieceList.TypeOfPieceInList, isEndgame);
 
             foreach (Piece piece in pieceList)
             {
-                Square square = piece.Square;
-                int file = square.File;
-                int rank = piece.IsWhite ? 7 - square.Rank : square.Rank;
-
-                int value = adjustmentTable[rank, file] + pieceValue;
-                score += piece.IsWhite ? value : -value;
+                int rank = piece.IsWhite ? 7 - piece.Square.Rank : piece.Square.Rank;
+                score += (piece.IsWhite ? 1 : -1) *
+                        (adjustmentTable[rank, piece.Square.File] + pieceValue);
             }
         }
 
         return board.IsWhiteToMove ? score : -score;
     }
-
 
     private int GetPieceValue(PieceType pieceType)
     {
