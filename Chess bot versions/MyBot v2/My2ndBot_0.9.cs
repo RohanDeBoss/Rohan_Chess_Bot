@@ -3,8 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// My2ndBot v1.3 Smoothed and nerfed LMR and NMP, debugging + optimisations!
-
+// My2ndBot v0.9 Smoothed and nerfed LMR and NMP, debugging + Code cleanup!
 public class MyBot : IChessBot
 {
     // Constants
@@ -24,7 +23,7 @@ public class MyBot : IChessBot
     private int negamaxPositions = 0;
     private int qsearchPositions = 0;
     public int bestScore;
-    private Move[] killerMoves = new Move[100 * 2];
+    private Move[] killerMoves = new Move[200 * 2];
     private int[,] historyMoves = new int[64, 64];
     private int cachedPieceCount = -1;
     private ulong lastBoardHash;
