@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// My2ndBot v1.1 Time management, LMR and NMP tweaks + Bug fixes!
+// My2ndBot v0.8 Time management with tsfot = variable , LMR and NMP tweaks + Bug fixes!
 public class MyBot : IChessBot
 {
     // Constants
@@ -20,7 +20,7 @@ public class MyBot : IChessBot
     // Instance Fields
     private int positionsSearched = 0;
     public int bestScore;
-    private Move[] killerMoves = new Move[100 * 2];
+    private Move[] killerMoves = new Move[200 * 2];
     private int[,] historyMoves = new int[64, 64];
     private int cachedPieceCount = -1;
     private ulong lastBoardHash;
