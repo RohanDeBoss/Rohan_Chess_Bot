@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v2.0.1: Tweaks to aspiration and MVV_MULTIPLIER
+// v1.4: Tweaks to aspiration and MVV_MULTIPLIER + Removed Move ordering check bonus
 public class MyBot : IChessBot
 {
     // Search Parameters
