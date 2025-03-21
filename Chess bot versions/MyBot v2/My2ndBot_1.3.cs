@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v1.8.4 Lots of small changes + Removed frutility pruning
+// v1.3 Lots of small changes + Removed frutility pruning
 public class MyBot : IChessBot
 {
 
