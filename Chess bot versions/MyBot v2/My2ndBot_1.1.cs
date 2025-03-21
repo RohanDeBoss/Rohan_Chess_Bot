@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using System;
 
-// My2ndBot v1.5 Time management improvements + Bugfixing :)
+// My2ndBot v1.1 Time management improvements + Bugfixing :)
 public class MyBot : IChessBot
 {
     // Constants
@@ -23,7 +23,7 @@ public class MyBot : IChessBot
     private int negamaxPositions = 0;
     private int qsearchPositions = 0;
     public int bestScore;
-    private Move[] killerMoves = new Move[100 * 2];
+    private Move[] killerMoves = new Move[200 * 2];
     private int[,] historyMoves = new int[64, 64];
     private int cachedPieceCount = -1;
     private ulong lastBoardHash;
