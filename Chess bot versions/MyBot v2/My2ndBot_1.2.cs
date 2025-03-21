@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using System;
 
-// My2ndBot v1.6.2 Debugging Updates/fixes
+// My2ndBot v1.2 Debugging Updates + Bugfixes to killermoves + Other fixes
 public class MyBot : IChessBot
 {
     // Constants
@@ -354,7 +354,7 @@ public class MyBot : IChessBot
                 !board.IsInCheck() &&
                 !move.IsCapture &&
                 !move.IsPromotion &&
-                standPat + 150 * depth < alpha)
+                standPat + 125 * depth < alpha)
             {
                 continue;
             }
