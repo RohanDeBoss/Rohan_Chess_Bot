@@ -3,15 +3,15 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// My2ndBot v1.0 Mate in detection + Periodic decay tweak
+// My2ndBot v0.7 Mate in detection + Periodic decay tweak, other tweaks, tsfot = 28
 public class MyBot : IChessBot
 {
     // Constants
-    private const bool ConstantDepth = true;
+    private const bool ConstantDepth = false;
     private const short MaxDepth = 4;
     private const short InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22;
-    private const short TimeSpentFractionofTotal = 25;
+    private const short TimeSpentFractionofTotal = 28;
     private const byte LMR_THRESHOLD = 2;
 
     // Static Fields
@@ -22,7 +22,7 @@ public class MyBot : IChessBot
     // Instance Fields
     private int positionsSearched = 0;
     public int bestScore;
-    private Move[] killerMoves = new Move[100 * 2];
+    private Move[] killerMoves = new Move[200 * 2];
     private int[,] historyMoves = new int[64, 64];
     private int cachedPieceCount = -1;
     private ulong lastBoardHash;
@@ -67,24 +67,19 @@ public class MyBot : IChessBot
 
     public Move Think(Board board, Timer timer)
     {
-        Move bestMove = Move.NullMove;
+        var legalMoves = board.GetLegalMoves();
+        Move bestMove = legalMoves[0]; // Changed from Move.NullMove and moved after legalMoves
         positionsSearched = 0;
-        currentDepth = 0;
         short depth = 1;
         int previousBestScore = 0;
         Move previousBestMove = Move.NullMove;
-        var legalMoves = board.GetLegalMoves();
 
         // Immediate checkmate check
         foreach (Move move in legalMoves)
         {
             if (IsCheckmateMove(move, board))
-            {
-                bestScore = InfiniteScore - 50; // Set bestScore for Mate in 1
                 return EvalLog(move, board, 1);
-            }
         }
-
         if (legalMoves.Length == 0) return Move.NullMove;
 
         // Aspiration search logic
