@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Numerics;
 
 
-// v2.2 Move ordering changes + timer fix
+// v1.5 Move ordering changes + timer fix + board.getlegalmoves(true) optimisation.
 public class MyBot : IChessBot
 {
     // Search Parameters
@@ -59,7 +59,7 @@ public class MyBot : IChessBot
         currentTimer = timer; // Assign timer for use in time checks
         if (timer.MillisecondsRemaining <= 0) // Immediate time check
         {
-            var moves = board.GetLegalMoves();
+            var moves = board.GetLegalMoves(true);
             return moves.Length > 0 ? moves[0] : Move.NullMove;
         }
 
