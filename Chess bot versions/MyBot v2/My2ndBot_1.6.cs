@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Numerics;
 
 
-// v2.3 Evaluate king proximity in endgames
+// v1.6 Evaluate king proximity in endgames
 public class MyBot : IChessBot
 {
     // Search Parameters
@@ -405,7 +405,7 @@ public class MyBot : IChessBot
         if (standPat >= beta) return beta;
         if (standPat > alpha) alpha = standPat;
 
-        Move[] allMoves = board.GetLegalMoves();
+        Move[] allMoves = board.GetLegalMoves(true);
         List<Move> captureMoves = new List<Move>();
         List<Move> checkMoves = new List<Move>();
 
