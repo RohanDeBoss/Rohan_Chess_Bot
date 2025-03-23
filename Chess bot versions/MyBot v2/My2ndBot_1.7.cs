@@ -4,8 +4,7 @@ using System.Collections.Generic;
 using System.Numerics;
 
 
-// v2.4.2 Replace board.GetLegalMoves() with board.GetLegalMoves(true)
-
+// v1.7 Time management formula (very tweaked) + LMR improved, +10 tempo added
 public class MyBot : IChessBot
 {
     // Search Parameters
