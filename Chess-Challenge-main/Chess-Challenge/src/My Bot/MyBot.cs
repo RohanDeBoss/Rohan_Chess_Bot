@@ -4,13 +4,12 @@ using System.Collections.Generic;
 using System.Numerics;
 
 
-// v2.4.2 Replace board.GetLegalMoves() with board.GetLegalMoves(true)
-
+// v1.7 Time management formula (very tweaked) + LMR improved, +10 tempo added
 public class MyBot : IChessBot
 {
     // Search Parameters
-    private const bool ConstantDepth = false;
-    private const short MaxDepth = 2; // Used when ConstantDepth is true
+    private const bool ConstantDepth = true;
+    private const short MaxDepth = 30; // Used when ConstantDepth is true
     private const short MaxSafetyDepth = 99;
     private const int InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22;
