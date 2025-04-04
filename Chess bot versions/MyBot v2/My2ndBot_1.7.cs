@@ -5,6 +5,41 @@ using System.Numerics;
 
 
 // v1.7 Time management formula (very tweaked) + LMR improved, +10 tempo added
+//Important bug found! The bot will think it's fine to throw a pawn in my king's face, undefended, when another pawn is being attacked and will be captured anyway. This just loses both pawns and the bot doesn't see it until I capture the first one!
+//When rook under attack by my bishop (the rook is defended), the bot thinks it's fine to push a pawn where it can be captured for free at depth 7!?
+/* MyBot: Depth: 6
+MyBot: No mate found
+MyBot: Eval: -81
+MyBot: Total: 4,551
+
+MyBot: Depth: 8
+MyBot: No mate found
+MyBot: Eval: 45
+MyBot: Total: 9,187
+*/
+
+//Also the checkmate debugging bug still exists, and the bot definetely sees the mate in 3, it just doesnt report it correctly: 
+/* MyBot: Depth: 8
+MyBot: Winning Mate in 7 ply! :)
+MyBot: Eval: 29650
+MyBot: Total: 4,861
+
+MyBot: Depth: 10
+MyBot: Winning Mate in 5 ply! :)
+MyBot: Eval: 29750
+MyBot: Total: 4,647
+
+MyBot: Depth: 8
+MyBot: Winning Mate in 5 ply! :)
+MyBot: Eval: 29750
+MyBot: Total: 2,484
+
+MyBot: Depth: 1
+MyBot: Winning Mate in 1 ply! :)
+MyBot: Eval: 29950
+MyBot: Total: 0
+Game Over: BlackIsMated */
+
 public class MyBot : IChessBot
 {
     // Search Parameters

@@ -4,13 +4,49 @@ using System.Collections.Generic;
 using System.Numerics;
 
 
-// v2.4.2 Replace board.GetLegalMoves() with board.GetLegalMoves(true)
+// v1.7 Time management formula (very tweaked) + LMR improved, +10 tempo added
+
+//Important bug found! The bot will think it's fine to throw a pawn in my king's face, undefended, when another pawn is being attacked and will be captured anyway. This just loses both pawns and the bot doesn't see it until I capture the first one!
+//When rook under attack by my bishop (the rook is defended), the bot thinks it's fine to push a pawn where it can be captured for free at depth 7!?
+/* MyBot: Depth: 6
+MyBot: No mate found
+MyBot: Eval: -81
+MyBot: Total: 4,551
+
+MyBot: Depth: 8
+MyBot: No mate found
+MyBot: Eval: 45
+MyBot: Total: 9,187
+*/
+
+//Also the checkmate debugging bug still exists, and the bot definetely sees the mate in 3, it just doesnt report it correctly: 
+/* MyBot: Depth: 8
+MyBot: Winning Mate in 7 ply! :)
+MyBot: Eval: 29650
+MyBot: Total: 4,861
+
+MyBot: Depth: 10
+MyBot: Winning Mate in 5 ply! :)
+MyBot: Eval: 29750
+MyBot: Total: 4,647
+
+MyBot: Depth: 8
+MyBot: Winning Mate in 5 ply! :)
+MyBot: Eval: 29750
+MyBot: Total: 2,484
+
+MyBot: Depth: 1
+MyBot: Winning Mate in 1 ply! :)
+MyBot: Eval: 29950
+MyBot: Total: 0
+Game Over: BlackIsMated */
+/* I don't want to randomly change the evaluation, I want to actually fix the root issue, find out why when I am attacking 1 of my opponents pieces that can't escape, it thinks it is fine to attack me with another undefended piece and thinks that it won't just lose both of them. (Depth is not the issue as shown in the debugging snippets.) */
 
 public class EvilBot : IChessBot
 {
     // Search Parameters
     private const bool ConstantDepth = false;
-    private const short MaxDepth = 2; // Used when ConstantDepth is true
+    private const short MaxDepth = 12; // Used when ConstantDepth is true
     private const short MaxSafetyDepth = 99;
     private const int InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22;
@@ -36,8 +72,8 @@ public class EvilBot : IChessBot
     private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 };
 
     // Instance Fields
-    private int negamaxPositions = 0;
-    private int qsearchPositions = 0;
+    private long negamaxPositions = 0;
+    private long qsearchPositions = 0;
     private int bestScore;
     private List<Move> killerMoves = new List<Move>();
     private int[,] historyMoves = new int[64, 64];
@@ -334,7 +370,7 @@ public class EvilBot : IChessBot
         }
 
         // Razor pruning (existing optimization)
-        if (depth == 1 && !board.IsInCheck() && standPat + 400 < alpha && moves.Length < 15)
+        if (depth == 1 && !board.IsInCheck() && standPat + 200 < alpha && moves.Length < 15)
             return Quiescence(board, alpha, beta, ply, 0);
 
         // Conservative Futility, Prune quiet moves at low depths if they’re unlikely to beat alpha
@@ -365,7 +401,6 @@ public class EvilBot : IChessBot
 
             // Extensions
             if (givesCheck && depth < 5) newDepth += 1;
-            if (inMateZone) newDepth += 1;
 
             // Late Move Reductions (LMR)
             bool useLMR = !inMateZone && depth > 2 && i >= 2 && !move.IsCapture && !move.IsPromotion && !givesCheck;

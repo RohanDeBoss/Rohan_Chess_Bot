@@ -1,9 +1,7 @@
 ﻿using ChessChallenge.API;
 using System;
-using System.Numerics;
-using System.Collections.Generic;
-using System.Linq;
 
+//Reference 1
 public class EvilBot : IChessBot
 {
     // { None, Pawn, Knight, Bishop, Rook, Queen, King}
