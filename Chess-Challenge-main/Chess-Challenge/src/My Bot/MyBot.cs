@@ -4,49 +4,13 @@ using System.Collections.Generic;
 using System.Numerics;
 
 
-// v1.7.1 Tweaks to qsearch
-
-//Important bug found! The bot will think it's fine to throw a pawn in my king's face, undefended, when another pawn is being attacked and will be captured anyway. This just loses both pawns and the bot doesn't see it until I capture the first one!
-//When rook under attack by my bishop (the rook is defended), the bot thinks it's fine to push a pawn where it can be captured for free at depth 7!?
-/* MyBot: Depth: 6
-MyBot: No mate found
-MyBot: Eval: -81
-MyBot: Total: 4,551
-
-MyBot: Depth: 8
-MyBot: No mate found
-MyBot: Eval: 45
-MyBot: Total: 9,187
-*/
-
-//Also the checkmate debugging bug still exists, and the bot definetely sees the mate in 3, it just doesnt report it correctly: 
-/* MyBot: Depth: 8
-MyBot: Winning Mate in 7 ply! :)
-MyBot: Eval: 29650
-MyBot: Total: 4,861
-
-MyBot: Depth: 10
-MyBot: Winning Mate in 5 ply! :)
-MyBot: Eval: 29750
-MyBot: Total: 4,647
-
-MyBot: Depth: 8
-MyBot: Winning Mate in 5 ply! :)
-MyBot: Eval: 29750
-MyBot: Total: 2,484
-
-MyBot: Depth: 1
-MyBot: Winning Mate in 1 ply! :)
-MyBot: Eval: 29950
-MyBot: Total: 0
-Game Over: BlackIsMated */
-/* I don't want to randomly change the evaluation, I want to actually fix the root issue, find out why when I am attacking 1 of my opponents pieces that can't escape, it thinks it is fine to attack me with another undefended piece and thinks that it won't just lose both of them. (Depth is not the issue as shown in the debugging snippets.) */
+// v1.7.3 Time management
 
 public class MyBot : IChessBot
 {
     // Search Parameters
     private const bool ConstantDepth = false;
-    private const short MaxDepth = 10; // Used when ConstantDepth is true
+    private const short MaxDepth = 5; // Used when ConstantDepth is true
     private const short MaxSafetyDepth = 99;
     private const int InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22;
@@ -65,7 +29,6 @@ public class MyBot : IChessBot
     private const int MAX_ASPIRATION_DEPTH = 3;
     private const int CHECKMATE_SCORE_THRESHOLD = 25000;
     private const int SAFETY_MARGIN = 10;
-    private const int checkext = 4;
 
     // Static Fields
     private TTEntry[] tt = new TTEntry[TT_SIZE];
@@ -378,7 +341,7 @@ public class MyBot : IChessBot
         bool inMateZone = Math.Abs(standPat) > InfiniteScore - 1000;
         if (depth <= 3 && !board.IsInCheck() && moves.Length > 0 && !inMateZone)
         {
-            int futilityMargin = depth * 100; // Margin: 100 at depth 1, 200 at depth 2, 300 at depth 3
+            int futilityMargin = depth * 125; // 250 at depth 2, 375 at depth 3...
             if (standPat + futilityMargin <= alpha)
                 return Quiescence(board, alpha, beta, ply, 0); // Skip to quiescence search
         }
@@ -453,90 +416,65 @@ public class MyBot : IChessBot
         return localBestScore;
     }
 
-    private int Quiescence(Board board, int alpha, int beta, int ply, int qDepth, int maxQDepth = 8)
+    private int Quiescence(Board board, int alpha, int beta, int ply, int qDepth)
     {
         qsearchPositions++;
 
-        // Check for draw
-        if (board.IsDraw()) return 0;
-
-        // Use evaluation as the lower bound for this node
         int standPat = Evaluate(board);
-
-        // Stand-pat pruning: If static eval is already good enough, return beta.
         if (standPat >= beta) return beta;
-
-        // Update alpha: If static eval is better than current alpha, use it as the baseline.
-        // This ensures that if no capture/check improves the situation, we still return the best known score.
         if (standPat > alpha) alpha = standPat;
 
-        // Check recursion depth limit for QSearch
-        if (qDepth >= maxQDepth) return alpha; // Return best score found so far (at least standPat)
+        Move[] allMoves = board.GetLegalMoves(true);
+        List<Move> captureMoves = new List<Move>();
+        List<Move> checkMoves = new List<Move>();
 
-        // --- Capture Search ---
-        // Generate and order captures first
-        Move[] captureMoves = board.GetLegalMoves(true); // true = captures only
-        Move[] orderedCaptures = OrderMoves(captureMoves, board, ply); // Order captures (MVV/LVA etc.)
+        // Include checks if near mate or in check, limit to qDepth <= 2
+        bool includeChecks = (Math.Abs(standPat) > InfiniteScore - 1500 || board.IsInCheck()) && qDepth <= 2;
 
-        foreach (Move move in orderedCaptures)
+        foreach (Move move in allMoves)
         {
-            // Optional: Delta Pruning could be added here for optimization,
-            // but let's keep it simple and correct first.
-
-            board.MakeMove(move);
-            int score = -Quiescence(board, -beta, -alpha, ply + 1, qDepth + 1, maxQDepth);
-            board.UndoMove(move);
-
-            if (score >= beta) return beta; // Fail-high cutoff
-            if (score > alpha) alpha = score; // Found a better capture sequence
+            if (move.IsCapture)
+            {
+                captureMoves.Add(move);
+            }
+            else if (includeChecks)
+            {
+                board.MakeMove(move);
+                if (board.IsInCheck())
+                {
+                    checkMoves.Add(move);
+                }
+                board.UndoMove(move);
+            }
         }
 
-        // --- Check Search ---
-        // Only search checks if we haven't already failed high (beta cutoff)
-        // And limit the depth to avoid excessive search time in quiet positions.
-        if (qDepth < checkext + 1) // Search checks up to qDepth 3 (adjust as needed)
+        // Order and evaluate captures first
+        Move[] orderedCaptures = OrderMoves(captureMoves.ToArray(), board, ply);
+        foreach (Move move in orderedCaptures)
         {
-            Move[] allMoves = board.GetLegalMoves(false); // Get all moves
-            List<Move> checkMoves = new List<Move>();
-            foreach (Move move in allMoves)
-            {
-                // Consider only quiet moves (non-captures) that deliver check.
-                // Promotions are often handled in capture logic if they capture.
-                // Handle non-capturing promotions separately if needed.
-                if (!move.IsCapture)
-                {
-                    board.MakeMove(move);
-                    bool givesCheck = board.IsInCheck();
-                    board.UndoMove(move); // Undo immediately
+            board.MakeMove(move);
+            int score = -Quiescence(board, -beta, -alpha, ply + 1, qDepth + 1);
+            board.UndoMove(move);
 
-                    if (givesCheck)
-                    {
-                        // Ensure it wasn't already processed as a capture (e.g., pawn promotion capture)
-                        // This check might be redundant given `!move.IsCapture` but safe.
-                        bool alreadyProcessed = false;
-                        foreach (Move cap in orderedCaptures) { if (cap == move) { alreadyProcessed = true; break; } }
+            if (score >= beta) return beta;
+            if (score > alpha) alpha = score;
+        }
 
-                        if (!alreadyProcessed) checkMoves.Add(move);
-                    }
-                }
-            }
-
-            // Order and search checks
-            // Using OrderMoves might not be ideal for checks, but it's a start.
+        if (includeChecks)
+        {
             Move[] orderedChecks = OrderMoves(checkMoves.ToArray(), board, ply);
             foreach (Move move in orderedChecks)
             {
                 board.MakeMove(move);
-                // Recurse with Quiescence, as checks can lead to more captures/checks
-                int score = -Quiescence(board, -beta, -alpha, ply + 1, qDepth + 1, maxQDepth);
+                int score = -Quiescence(board, -beta, -alpha, ply + 1, qDepth + 1);
                 board.UndoMove(move);
 
-                if (score >= beta) return beta; // Fail-high cutoff
-                if (score > alpha) alpha = score; // Found a better check
+                if (score >= beta) return beta;
+                if (score > alpha) alpha = score;
             }
         }
 
-        return alpha; // Return the best score found (at least standPat)
+        return alpha;
     }
 
     private int Evaluate(Board board)
@@ -586,7 +524,7 @@ public class MyBot : IChessBot
             int kingDistance = fileDistance + rankDistance;
 
             // Convert distance to a bonus (smaller distance = larger bonus)
-            int proximityBonus = (14 - kingDistance) * 4;
+            int proximityBonus = (14 - kingDistance) * 5;
 
             // Apply bonus based on which side is winning
             if (score > 0)  // White is winning
