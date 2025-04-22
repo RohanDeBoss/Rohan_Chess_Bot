@@ -1,5 +1,4 @@
 ﻿using System.Collections.Generic;
-using System.Linq;
 namespace ChessChallenge.Chess
 {
     // Represents the current state of the board during a game.

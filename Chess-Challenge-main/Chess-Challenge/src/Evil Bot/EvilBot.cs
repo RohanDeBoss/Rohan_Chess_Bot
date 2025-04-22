@@ -3,45 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-
-// v1.7 Time management formula (very tweaked) + LMR improved, +10 tempo added
-
-//Important bug found! The bot will think it's fine to throw a pawn in my king's face, undefended, when another pawn is being attacked and will be captured anyway. This just loses both pawns and the bot doesn't see it until I capture the first one!
-//When rook under attack by my bishop (the rook is defended), the bot thinks it's fine to push a pawn where it can be captured for free at depth 7!?
-/* MyBot: Depth: 6
-MyBot: No mate found
-MyBot: Eval: -81
-MyBot: Total: 4,551
-
-MyBot: Depth: 8
-MyBot: No mate found
-MyBot: Eval: 45
-MyBot: Total: 9,187
-*/
-
-//Also the checkmate debugging bug still exists, and the bot definetely sees the mate in 3, it just doesnt report it correctly: 
-/* MyBot: Depth: 8
-MyBot: Winning Mate in 7 ply! :)
-MyBot: Eval: 29650
-MyBot: Total: 4,861
-
-MyBot: Depth: 10
-MyBot: Winning Mate in 5 ply! :)
-MyBot: Eval: 29750
-MyBot: Total: 4,647
-
-MyBot: Depth: 8
-MyBot: Winning Mate in 5 ply! :)
-MyBot: Eval: 29750
-MyBot: Total: 2,484
-
-MyBot: Depth: 1
-MyBot: Winning Mate in 1 ply! :)
-MyBot: Eval: 29950
-MyBot: Total: 0
-Game Over: BlackIsMated */
-/* I don't want to randomly change the evaluation, I want to actually fix the root issue, find out why when I am attacking 1 of my opponents pieces that can't escape, it thinks it is fine to attack me with another undefended piece and thinks that it won't just lose both of them. (Depth is not the issue as shown in the debugging snippets.) */
-
+// v1.8.1 Singular extension check + Negamax early time exit + tweaks
 public class EvilBot : IChessBot
 {
     // Search Parameters
@@ -91,10 +53,10 @@ public class EvilBot : IChessBot
         // - 1s: ~60 (was 62)
         // - 5s: ~37 (was 38)
         // - 20s: ~27 (was 27)
-        // - 50s: ~25 (was 25)
+        // - 50s: ~26 (was 25)
         int result = 23 + 99900 / (t + 1675); // Integer division
 
-        return (short)Math.Max(25, Math.Min(65, result)); // Clamp between 25 and 65
+        return (short)Math.Max(26, Math.Min(65, result)); // Clamp between 26 and 65
     }
 
     public Move Think(Board board, Timer timer)
@@ -146,9 +108,7 @@ public class EvilBot : IChessBot
             : (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 4);
 
         // Iterative deepening loop with MaxSafetyDepth cap
-        while (depth <= MaxSafetyDepth &&
-               (ConstantDepth && depth <= MaxDepth ||
-                !ConstantDepth && timer.MillisecondsElapsedThisTurn - SAFETY_MARGIN < maxTimeForTurn))
+        while (depth <= MaxSafetyDepth && (ConstantDepth && depth <= MaxDepth || !ConstantDepth && timer.MillisecondsElapsedThisTurn - SAFETY_MARGIN < maxTimeForTurn))
         {
             if (timer.MillisecondsRemaining <= 0) // Check before new depth
             {
@@ -162,6 +122,7 @@ public class EvilBot : IChessBot
             int beta = InfiniteScore;
             int aspirationWindow = INITIAL_ASPIRATION_WINDOW;
             bool aspirationFailed;
+            bool timeExpired = false; // New flag to detect Negamax early exit
 
             do
             {
@@ -187,6 +148,15 @@ public class EvilBot : IChessBot
                     board.MakeMove(move);
                     int score = -Negamax(board, depth - 1, -beta, -alpha, 1, 1);
                     board.UndoMove(move);
+
+                    // Check if Negamax bailed out due to time
+                    if (currentTimer.MillisecondsElapsedThisTurn >= currentTimer.MillisecondsRemaining / 10)
+                    {
+                        timeExpired = true;
+                        currentBestScore = score; // Use the score from the early exit
+                        bestMove = move;
+                        break;
+                    }
 
                     if (score > currentBestScore)
                     {
@@ -216,6 +186,11 @@ public class EvilBot : IChessBot
                 }
             } while (aspirationFailed);
 
+            if (timeExpired)
+            {
+                break; // Exit the deepening loop if Negamax signaled time is up
+            }
+
             previousBestMove = bestMove;
             depth++;
             //LogEval(board, currentDepth, false);
@@ -230,7 +205,7 @@ public class EvilBot : IChessBot
 
     private void DebugLog(string message)
     {
-        Console.WriteLine($"{GetType().Name}: {message}");
+        Console.WriteLine($"{GetType().Name} {message}");
     }
 
     private void LogEval(Board board, int depth, bool isForcedMove)
@@ -358,11 +333,17 @@ public class EvilBot : IChessBot
         // Static evaluation
         int standPat = Evaluate(board);
 
+        // Time check: Bail out if time is nearly up, returning best known score
+        if (ply == 1 && currentTimer != null && currentTimer.MillisecondsElapsedThisTurn >= currentTimer.MillisecondsRemaining / 15)
+        {
+            return ttEntry.Key == key && ttEntry.Score != 0 ? ttEntry.Score : standPat;
+        }
+
         // Null move pruning (existing optimization)
         if (!board.IsInCheck() && depth > 3 && Math.Abs(standPat) < InfiniteScore - 1500)
         {
             board.ForceSkipTurn();
-            int reduction = Math.Min(3, 1 + depth / 4);
+            int reduction = Math.Min(3, 1 + depth / 3); //more aggressive /3
             int nullScore = -Negamax(board, depth - reduction - 1, -beta, -beta + 1, ply + 1, realPly + 1);
             board.UndoSkipTurn();
             if (nullScore >= beta)
@@ -377,7 +358,7 @@ public class EvilBot : IChessBot
         bool inMateZone = Math.Abs(standPat) > InfiniteScore - 1000;
         if (depth <= 3 && !board.IsInCheck() && moves.Length > 0 && !inMateZone)
         {
-            int futilityMargin = depth * 100; // Margin: 100 at depth 1, 200 at depth 2, 300 at depth 3
+            int futilityMargin = depth * 125; // 250 at depth 2, 375 at depth 3...
             if (standPat + futilityMargin <= alpha)
                 return Quiescence(board, alpha, beta, ply, 0); // Skip to quiescence search
         }
@@ -391,6 +372,25 @@ public class EvilBot : IChessBot
         Move bestMove = Move.NullMove;
         int localBestScore = -InfiniteScore;
 
+        // Singular extension check (cancellable and less aggressive)
+        bool isSingular = false;
+        if (depth >= 8 && ttEntry.Key == key && ttEntry.Depth >= depth - 2 && ttEntry.Flag != ALPHA && currentTimer != null && currentTimer.MillisecondsElapsedThisTurn < currentTimer.MillisecondsRemaining / 20)
+        {
+            Move ttMove = ttEntry.BestMove;
+            if (!ttMove.IsNull && Array.Exists(moves, m => m == ttMove))
+            {
+                int singularBeta = ttEntry.Score; // Test against TT score
+                int reducedDepth = depth - 3;     // Reduced depth for singularity test
+                board.MakeMove(ttMove);
+                int singularScore = -Negamax(board, reducedDepth - 1, -singularBeta - 1, -singularBeta, ply + 1, realPly + 1);
+                board.UndoMove(ttMove);
+                if (singularScore >= singularBeta)
+                {
+                    isSingular = true; // Move is singular if no other move refutes it
+                }
+            }
+        }
+
         for (int i = 0; i < moves.Length; i++)
         {
             Move move = moves[i];
@@ -401,6 +401,7 @@ public class EvilBot : IChessBot
 
             // Extensions
             if (givesCheck && depth < 5) newDepth += 1;
+            if (isSingular && move == ttEntry.BestMove && i == 0) newDepth += 1; // Singular extension
 
             // Late Move Reductions (LMR)
             bool useLMR = !inMateZone && depth > 2 && i >= 2 && !move.IsCapture && !move.IsPromotion && !givesCheck;
@@ -412,18 +413,8 @@ public class EvilBot : IChessBot
                 newDepth = Math.Max(newDepth - reduction, 1);
             }
 
-            // Search the move
-            int score;
-            if (i == 0)
-            {
-                score = -Negamax(board, newDepth, -beta, -alpha, ply + 1, realPly + 1);
-            }
-            else
-            {
-                score = -Negamax(board, newDepth, -alpha - 1, -alpha, ply + 1, realPly + 1);
-                if (score > alpha && score < beta)
-                    score = -Negamax(board, newDepth, -beta, -alpha, ply + 1, realPly + 1);
-            }
+            // Search the move (reverted to pre-PVS logic)
+            int score = -Negamax(board, newDepth, -beta, -alpha, ply + 1, realPly + 1);
             board.UndoMove(move);
 
             // Update best score and move
@@ -551,6 +542,17 @@ public class EvilBot : IChessBot
             }
         }
 
+        // —— ADD THIS BISHOP‑PAIR BONUS —— 
+        // Count bishops quickly via the bitboard popcount:
+        ulong whiteBishopsBB = board.GetPieceBitboard(PieceType.Bishop, true);
+        ulong blackBishopsBB = board.GetPieceBitboard(PieceType.Bishop, false);
+        int whiteBishops = BitOperations.PopCount(whiteBishopsBB);
+        int blackBishops = BitOperations.PopCount(blackBishopsBB);
+
+        const int BISHOP_PAIR_BONUS = 50;  // tweakable: 50 centipawns
+        if (whiteBishops >= 2) score += BISHOP_PAIR_BONUS;
+        if (blackBishops >= 2) score -= BISHOP_PAIR_BONUS;
+
         // Add king proximity bonus in endgames when winning significantly
         if (isEndgame && Math.Abs(score) > 300)
         {
@@ -560,7 +562,7 @@ public class EvilBot : IChessBot
             int kingDistance = fileDistance + rankDistance;
 
             // Convert distance to a bonus (smaller distance = larger bonus)
-            int proximityBonus = (14 - kingDistance) * 4;
+            int proximityBonus = (14 - kingDistance) * 5;
 
             // Apply bonus based on which side is winning
             if (score > 0)  // White is winning

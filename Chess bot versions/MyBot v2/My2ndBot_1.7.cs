@@ -194,7 +194,7 @@ public class MyBot : IChessBot
 
     private void DebugLog(string message)
     {
-        Console.WriteLine($"{GetType().Name}: {message}");
+        Console.WriteLine($"{GetType().Name} {message}");
     }
 
     private void LogEval(Board board, int depth, bool isForcedMove)

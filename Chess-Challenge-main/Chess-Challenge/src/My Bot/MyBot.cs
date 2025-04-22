@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v1.8 bishop pair bonus + tweaks
+// v1.8.1 Singular extension check + Negamax early time exit + tweaks
 public class MyBot : IChessBot
 {
     // Search Parameters
@@ -108,9 +108,7 @@ public class MyBot : IChessBot
             : (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 4);
 
         // Iterative deepening loop with MaxSafetyDepth cap
-        while (depth <= MaxSafetyDepth &&
-               (ConstantDepth && depth <= MaxDepth ||
-                !ConstantDepth && timer.MillisecondsElapsedThisTurn - SAFETY_MARGIN < maxTimeForTurn))
+        while (depth <= MaxSafetyDepth && (ConstantDepth && depth <= MaxDepth || !ConstantDepth && timer.MillisecondsElapsedThisTurn - SAFETY_MARGIN < maxTimeForTurn))
         {
             if (timer.MillisecondsRemaining <= 0) // Check before new depth
             {
@@ -124,6 +122,7 @@ public class MyBot : IChessBot
             int beta = InfiniteScore;
             int aspirationWindow = INITIAL_ASPIRATION_WINDOW;
             bool aspirationFailed;
+            bool timeExpired = false; // New flag to detect Negamax early exit
 
             do
             {
@@ -149,6 +148,15 @@ public class MyBot : IChessBot
                     board.MakeMove(move);
                     int score = -Negamax(board, depth - 1, -beta, -alpha, 1, 1);
                     board.UndoMove(move);
+
+                    // Check if Negamax bailed out due to time
+                    if (currentTimer.MillisecondsElapsedThisTurn >= currentTimer.MillisecondsRemaining / 10)
+                    {
+                        timeExpired = true;
+                        currentBestScore = score; // Use the score from the early exit
+                        bestMove = move;
+                        break;
+                    }
 
                     if (score > currentBestScore)
                     {
@@ -178,6 +186,11 @@ public class MyBot : IChessBot
                 }
             } while (aspirationFailed);
 
+            if (timeExpired)
+            {
+                break; // Exit the deepening loop if Negamax signaled time is up
+            }
+
             previousBestMove = bestMove;
             depth++;
             //LogEval(board, currentDepth, false);
@@ -192,7 +205,7 @@ public class MyBot : IChessBot
 
     private void DebugLog(string message)
     {
-        Console.WriteLine($"{GetType().Name}: {message}");
+        Console.WriteLine($"{GetType().Name} {message}");
     }
 
     private void LogEval(Board board, int depth, bool isForcedMove)
@@ -320,11 +333,17 @@ public class MyBot : IChessBot
         // Static evaluation
         int standPat = Evaluate(board);
 
+        // Time check: Bail out if time is nearly up, returning best known score
+        if (ply == 1 && currentTimer != null && currentTimer.MillisecondsElapsedThisTurn >= currentTimer.MillisecondsRemaining / 15)
+        {
+            return ttEntry.Key == key && ttEntry.Score != 0 ? ttEntry.Score : standPat;
+        }
+
         // Null move pruning (existing optimization)
         if (!board.IsInCheck() && depth > 3 && Math.Abs(standPat) < InfiniteScore - 1500)
         {
             board.ForceSkipTurn();
-            int reduction = Math.Min(3, 1 + depth / 4);
+            int reduction = Math.Min(3, 1 + depth / 3); //more aggressive /3
             int nullScore = -Negamax(board, depth - reduction - 1, -beta, -beta + 1, ply + 1, realPly + 1);
             board.UndoSkipTurn();
             if (nullScore >= beta)
@@ -353,6 +372,25 @@ public class MyBot : IChessBot
         Move bestMove = Move.NullMove;
         int localBestScore = -InfiniteScore;
 
+        // Singular extension check (cancellable and less aggressive)
+        bool isSingular = false;
+        if (depth >= 8 && ttEntry.Key == key && ttEntry.Depth >= depth - 2 && ttEntry.Flag != ALPHA && currentTimer != null && currentTimer.MillisecondsElapsedThisTurn < currentTimer.MillisecondsRemaining / 20)
+        {
+            Move ttMove = ttEntry.BestMove;
+            if (!ttMove.IsNull && Array.Exists(moves, m => m == ttMove))
+            {
+                int singularBeta = ttEntry.Score; // Test against TT score
+                int reducedDepth = depth - 3;     // Reduced depth for singularity test
+                board.MakeMove(ttMove);
+                int singularScore = -Negamax(board, reducedDepth - 1, -singularBeta - 1, -singularBeta, ply + 1, realPly + 1);
+                board.UndoMove(ttMove);
+                if (singularScore >= singularBeta)
+                {
+                    isSingular = true; // Move is singular if no other move refutes it
+                }
+            }
+        }
+
         for (int i = 0; i < moves.Length; i++)
         {
             Move move = moves[i];
@@ -363,6 +401,7 @@ public class MyBot : IChessBot
 
             // Extensions
             if (givesCheck && depth < 5) newDepth += 1;
+            if (isSingular && move == ttEntry.BestMove && i == 0) newDepth += 1; // Singular extension
 
             // Late Move Reductions (LMR)
             bool useLMR = !inMateZone && depth > 2 && i >= 2 && !move.IsCapture && !move.IsPromotion && !givesCheck;
@@ -374,18 +413,8 @@ public class MyBot : IChessBot
                 newDepth = Math.Max(newDepth - reduction, 1);
             }
 
-            // Search the move
-            int score;
-            if (i == 0)
-            {
-                score = -Negamax(board, newDepth, -beta, -alpha, ply + 1, realPly + 1);
-            }
-            else
-            {
-                score = -Negamax(board, newDepth, -alpha - 1, -alpha, ply + 1, realPly + 1);
-                if (score > alpha && score < beta)
-                    score = -Negamax(board, newDepth, -beta, -alpha, ply + 1, realPly + 1);
-            }
+            // Search the move (reverted to pre-PVS logic)
+            int score = -Negamax(board, newDepth, -beta, -alpha, ply + 1, realPly + 1);
             board.UndoMove(move);
 
             // Update best score and move
@@ -513,7 +542,7 @@ public class MyBot : IChessBot
             }
         }
 
-        // —— BISHOP‑PAIR BONUS —— 
+        // —— ADD THIS BISHOP‑PAIR BONUS —— 
         // Count bishops quickly via the bitboard popcount:
         ulong whiteBishopsBB = board.GetPieceBitboard(PieceType.Bishop, true);
         ulong blackBishopsBB = board.GetPieceBitboard(PieceType.Bishop, false);

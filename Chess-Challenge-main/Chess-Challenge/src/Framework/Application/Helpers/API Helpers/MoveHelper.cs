@@ -1,6 +1,6 @@
-﻿using ChessChallenge.Chess;
+﻿using ChessChallenge.API;
+using ChessChallenge.Chess;
 using System;
-using ChessChallenge.API;
 
 namespace ChessChallenge.Application.APIHelpers
 {
