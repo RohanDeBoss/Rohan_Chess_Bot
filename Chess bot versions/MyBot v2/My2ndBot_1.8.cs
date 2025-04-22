@@ -513,7 +513,7 @@ public class MyBot : IChessBot
             }
         }
 
-        // —— BISHOP‑PAIR BONUS —— 
+        // —— ADD THIS BISHOP‑PAIR BONUS —— 
         // Count bishops quickly via the bitboard popcount:
         ulong whiteBishopsBB = board.GetPieceBitboard(PieceType.Bishop, true);
         ulong blackBishopsBB = board.GetPieceBitboard(PieceType.Bishop, false);

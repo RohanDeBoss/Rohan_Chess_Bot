@@ -4,47 +4,13 @@ using System.Collections.Generic;
 using System.Numerics;
 
 
-// v1.7 Time management formula (very tweaked) + LMR improved, +10 tempo added
-//Important bug found! The bot will think it's fine to throw a pawn in my king's face, undefended, when another pawn is being attacked and will be captured anyway. This just loses both pawns and the bot doesn't see it until I capture the first one!
-//When rook under attack by my bishop (the rook is defended), the bot thinks it's fine to push a pawn where it can be captured for free at depth 7!?
-/* MyBot: Depth: 6
-MyBot: No mate found
-MyBot: Eval: -81
-MyBot: Total: 4,551
-
-MyBot: Depth: 8
-MyBot: No mate found
-MyBot: Eval: 45
-MyBot: Total: 9,187
-*/
-
-//Also the checkmate debugging bug still exists, and the bot definetely sees the mate in 3, it just doesnt report it correctly: 
-/* MyBot: Depth: 8
-MyBot: Winning Mate in 7 ply! :)
-MyBot: Eval: 29650
-MyBot: Total: 4,861
-
-MyBot: Depth: 10
-MyBot: Winning Mate in 5 ply! :)
-MyBot: Eval: 29750
-MyBot: Total: 4,647
-
-MyBot: Depth: 8
-MyBot: Winning Mate in 5 ply! :)
-MyBot: Eval: 29750
-MyBot: Total: 2,484
-
-MyBot: Depth: 1
-MyBot: Winning Mate in 1 ply! :)
-MyBot: Eval: 29950
-MyBot: Total: 0
-Game Over: BlackIsMated */
+// v1.7.3 Time management
 
 public class MyBot : IChessBot
 {
     // Search Parameters
     private const bool ConstantDepth = false;
-    private const short MaxDepth = 2; // Used when ConstantDepth is true
+    private const short MaxDepth = 5; // Used when ConstantDepth is true
     private const short MaxSafetyDepth = 99;
     private const int InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22;
@@ -70,8 +36,8 @@ public class MyBot : IChessBot
     private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 };
 
     // Instance Fields
-    private int negamaxPositions = 0;
-    private int qsearchPositions = 0;
+    private long negamaxPositions = 0;
+    private long qsearchPositions = 0;
     private int bestScore;
     private List<Move> killerMoves = new List<Move>();
     private int[,] historyMoves = new int[64, 64];
@@ -89,10 +55,10 @@ public class MyBot : IChessBot
         // - 1s: ~60 (was 62)
         // - 5s: ~37 (was 38)
         // - 20s: ~27 (was 27)
-        // - 50s: ~25 (was 25)
+        // - 50s: ~26 (was 25)
         int result = 23 + 99900 / (t + 1675); // Integer division
 
-        return (short)Math.Max(25, Math.Min(65, result)); // Clamp between 25 and 65
+        return (short)Math.Max(26, Math.Min(65, result)); // Clamp between 25 and 65
     }
 
     public Move Think(Board board, Timer timer)
@@ -368,14 +334,14 @@ public class MyBot : IChessBot
         }
 
         // Razor pruning (existing optimization)
-        if (depth == 1 && !board.IsInCheck() && standPat + 400 < alpha && moves.Length < 15)
+        if (depth == 1 && !board.IsInCheck() && standPat + 200 < alpha && moves.Length < 15)
             return Quiescence(board, alpha, beta, ply, 0);
 
         // Conservative Futility, Prune quiet moves at low depths if they’re unlikely to beat alpha
         bool inMateZone = Math.Abs(standPat) > InfiniteScore - 1000;
         if (depth <= 3 && !board.IsInCheck() && moves.Length > 0 && !inMateZone)
         {
-            int futilityMargin = depth * 100; // Margin: 100 at depth 1, 200 at depth 2, 300 at depth 3
+            int futilityMargin = depth * 125; // 250 at depth 2, 375 at depth 3...
             if (standPat + futilityMargin <= alpha)
                 return Quiescence(board, alpha, beta, ply, 0); // Skip to quiescence search
         }
@@ -399,7 +365,6 @@ public class MyBot : IChessBot
 
             // Extensions
             if (givesCheck && depth < 5) newDepth += 1;
-            if (inMateZone) newDepth += 1;
 
             // Late Move Reductions (LMR)
             bool useLMR = !inMateZone && depth > 2 && i >= 2 && !move.IsCapture && !move.IsPromotion && !givesCheck;
@@ -559,7 +524,7 @@ public class MyBot : IChessBot
             int kingDistance = fileDistance + rankDistance;
 
             // Convert distance to a bonus (smaller distance = larger bonus)
-            int proximityBonus = (14 - kingDistance) * 4;
+            int proximityBonus = (14 - kingDistance) * 5;
 
             // Apply bonus based on which side is winning
             if (score > 0)  // White is winning
