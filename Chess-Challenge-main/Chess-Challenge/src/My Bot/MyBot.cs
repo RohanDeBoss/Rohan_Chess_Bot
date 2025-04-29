@@ -3,21 +3,21 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v2.0.2 remove redundant code
+// v2.0.3 Small improvements / Cleanup
 public class MyBot : IChessBot
 {
     // Time management flags
-    private const bool ConstantDepth = false;
-    private const short MaxDepth = 5; // Used when ConstantDepth is true
+    private static readonly bool ConstantDepth = false;
+    private static readonly short MaxDepth = 5; // Used when ConstantDepth is true
 
-    private const bool UseFixedTimePerMove = false; // Flag to enable fixed time per move
-    private const int FixedTimePerMoveMs = 500;   // Fixed time (if flag is true)
+    private static readonly bool UseFixedTimePerMove = false; // Flag to enable fixed time per move
+    private static readonly int FixedTimePerMoveMs = 150;   // Fixed time if flag is true (Don't set below 15ms)
 
     // More constants
     private const short MaxSafetyDepth = 99;
     private const int InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22; // Approx 4 million entries
-    private const int MAX_KILLER_PLY = 100; // Define max ply for killer moves array
+    private const int MAX_KILLER_PLY = 200; // Define max ply for killer moves array
 
     // Move Ordering Bonuses
     private const int TT_MOVE_BONUS = 10_000_000;
@@ -33,11 +33,11 @@ public class MyBot : IChessBot
     private const int MAX_ASPIRATION_DEPTH = 3;
     private const int CHECKMATE_SCORE_THRESHOLD = 25000; // Eval cutoff for mate scores
     private const int SAFETY_MARGIN = 15; // Small time buffer in ms
-    private const int TIME_CHECK_NODES = 2048; // How often to check the time
+    private const int TIME_CHECK_NODES = 200; // How often to check the time
 
     // Static Fields
     private TTEntry[] tt = new TTEntry[TT_SIZE];
-    private readonly ulong ttMask = (ulong)(TT_SIZE - 1);
+    private readonly ulong ttMask = TT_SIZE - 1;
     private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 }; // P, N, B, R, Q, K
 
     // Instance Fields
@@ -275,7 +275,7 @@ public class MyBot : IChessBot
         else
         {
             Console.WriteLine();
-            DebugLog($"Depth: {depth - 1}"); // Keep: Log completed depth
+            DebugLog($"Depth: {depth}"); // Keep: Log completed depth
             string mateInfo = GetMateInMoves(bestScore) ?? "No mate found";
             DebugLog(mateInfo);
             DebugLog($"Eval: {bestScore * (board.IsWhiteToMove ? 1 : -1)}"); // Eval from white's perspective
@@ -696,25 +696,18 @@ public class MyBot : IChessBot
     }
 
     // Adjust TT mate score based on current ply vs stored ply (relative to root)
-    private short AdjustMateScore(short score, int currentPly, int rootPly)
-    {
-        if (Math.Abs(score) > CHECKMATE_SCORE_THRESHOLD)
-        {
-            int sign = Math.Sign(score);
-            return (short)(score - sign * (currentPly - rootPly) * 50);
-        }
-        return score;
-    }
-
-    // Adjust mate score for TT storage (make it relative to root ply)
     private short AdjustMateScoreForStorage(int score, int currentPly, int rootPly)
     {
         if (Math.Abs(score) > CHECKMATE_SCORE_THRESHOLD)
         {
-            int sign = Math.Sign(score);
-            return (short)(score + sign * (currentPly - rootPly) * 50);
+            return (short)Math.Clamp(score, -InfiniteScore + 50, InfiniteScore - 50);
         }
         return (short)score;
+    }
+
+    private short AdjustMateScore(short score, int currentPly, int rootPly)
+    {
+        return score;
     }
 
     // -- Piece Square Tables --
