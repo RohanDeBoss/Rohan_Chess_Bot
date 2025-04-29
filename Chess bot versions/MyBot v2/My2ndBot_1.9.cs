@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v1.9 Time Management, Pruning Fixes, tweaks & bugfixes!
+// v1.9.1 Removed redundant foreach loop + qsearch cleanup
 public class MyBot : IChessBot
 {
     // Search Parameters
@@ -102,13 +102,6 @@ public class MyBot : IChessBot
         if (legalMoves.Length == 1)
         {
             return HandleForcedMove(legalMoves[0], board, 1, true);
-        }
-        foreach (Move move in legalMoves) // Check for immediate checkmate
-        {
-            if (IsCheckmateMove(move, board))
-            {
-                return HandleForcedMove(move, board, 1, false, InfiniteScore - 50);
-            }
         }
 
         // Time Allocation
@@ -438,6 +431,7 @@ public class MyBot : IChessBot
         // Static Evaluation for Pruning (calculated lazily)
         int standPat = 0;
         bool inCheck = board.IsInCheck();
+
         // Determine if eval is needed for pruning techniques
         bool needEvalForPruning = (!inCheck && (depth <= 3 || depth >= 3)); // Simplified
         if (needEvalForPruning) standPat = Evaluate(board);
@@ -556,49 +550,28 @@ public class MyBot : IChessBot
         if (standPat >= beta) return beta;
         if (standPat > alpha) alpha = standPat;
 
-        // Filter pseudolegal moves for captures and relevant checks
-        Move[] allMoves = board.GetLegalMoves(true);
-        List<Move> relevantMoves = new List<Move>();
+        // Get only capture moves for quiescence search
+        Move[] captures = board.GetLegalMoves(true); // Use the captures directly
 
-        bool inCheck = board.IsInCheck();
-        // Include checks in QSearch if currently in check or near mate, and not too deep
-        bool includeChecks = (inCheck || Math.Abs(standPat) > CHECKMATE_SCORE_THRESHOLD) && qDepth <= 2;
-
-        foreach (Move move in allMoves)
-        {
-            if (move.IsCapture)
-            {
-                // Optional: Delta Pruning could be added here
-                relevantMoves.Add(move);
-            }
-            else if (includeChecks)
-            {
-                // Check if a quiet move gives check (simplest way is make/undo)
-                board.MakeMove(move);
-                bool givesCheck = board.IsInCheck();
-                board.UndoMove(move);
-                if (givesCheck)
-                {
-                    relevantMoves.Add(move);
-                }
-            }
-        }
-
-        Move[] orderedMoves = OrderMoves(relevantMoves.ToArray(), board, ply); // Order captures/checks
+        // Order the capture moves
+        Move[] orderedMoves = OrderMoves(captures, board, ply);
 
         foreach (Move move in orderedMoves)
         {
+            // Optional: Delta Pruning could be added here before MakeMove if desired
+            // E.g., if (standPat + PieceValues[capturedPiece] + SAFETY_MARGIN < alpha) continue;
+
             board.MakeMove(move);
             int score = -Quiescence(board, -beta, -alpha, ply + 1, qDepth + 1);
             board.UndoMove(move);
 
             if (timeIsUp) return 0;
 
-            if (score >= beta) return beta;
-            if (score > alpha) alpha = score;
+            if (score >= beta) return beta; // Fail high
+            if (score > alpha) alpha = score; // Update lower bound
         }
 
-        return alpha;
+        return alpha; // Return best score found, or standPat if no captures improved alpha
     }
 
     private int Evaluate(Board board)
