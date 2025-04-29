@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Numerics;
 
 // v2.0 Switched killer moves to fixed-size array + Cleanup
-public class EvilBot : IChessBot
+public class MyBot : IChessBot
 {
     // Search Parameters
     private const bool ConstantDepth = false;

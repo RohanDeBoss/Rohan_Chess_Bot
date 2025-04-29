@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v1.9.2 Set isEndgame theshold to 11 pieces
+// v1.9.1 Removed redundant foreach loop + qsearch cleanup
 public class MyBot : IChessBot
 {
     // Search Parameters
@@ -643,13 +643,14 @@ public class MyBot : IChessBot
         ulong currentBoardHash = board.ZobristKey;
         if (currentBoardHash != lastBoardHash)
         {
-            // Calculate total number of pieces on the board directly
-            cachedPieceCount = BitOperations.PopCount(board.AllPiecesBitboard);
+            // Heuristic based on remaining material (queens weighted higher)
+            int queenCount = BitOperations.PopCount(board.GetPieceBitboard(PieceType.Queen, true)) + BitOperations.PopCount(board.GetPieceBitboard(PieceType.Queen, false));
+            int minorMajorCount = BitOperations.PopCount(board.AllPiecesBitboard) - BitOperations.PopCount(board.GetPieceBitboard(PieceType.Pawn, true)) - BitOperations.PopCount(board.GetPieceBitboard(PieceType.Pawn, false)) - BitOperations.PopCount(board.GetPieceBitboard(PieceType.King, true)) - BitOperations.PopCount(board.GetPieceBitboard(PieceType.King, false)) - queenCount;
+            cachedPieceCount = queenCount * 3 + minorMajorCount;
             lastBoardHash = currentBoardHash;
         }
-        const int endgameTotalPieceThreshold = 11; // Endgame if 11 or fewer total pieces (including kings) remain
-
-        return cachedPieceCount <= endgameTotalPieceThreshold;
+        const int endgameMaterialThreshold = 8;
+        return cachedPieceCount <= endgameMaterialThreshold;
     }
 
     private Move HandleForcedMove(Move move, Board board, int forcedDepth, bool isForcedMove, int? overrideScore = null)
