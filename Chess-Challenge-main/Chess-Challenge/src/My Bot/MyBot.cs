@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v1.9.3 Switched killer moves to fixed-size array
+// v2.0 Switched killer moves to fixed-size array + Cleanup
 public class MyBot : IChessBot
 {
     // Search Parameters
