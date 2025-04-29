@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v1.9.2 Set isEndgame theshold to 11 pieces
+// v1.9.3 Switched killer moves to fixed-size array
 public class MyBot : IChessBot
 {
     // Search Parameters
@@ -12,6 +12,7 @@ public class MyBot : IChessBot
     private const short MaxSafetyDepth = 99;
     private const int InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22; // Approx 4 million entries
+    private const int MAX_KILLER_PLY = 100; // Define max ply for killer moves array
 
     // Move Ordering Bonuses
     private const int TT_MOVE_BONUS = 10_000_000;
@@ -38,7 +39,7 @@ public class MyBot : IChessBot
     private long negamaxPositions = 0;
     private long qsearchPositions = 0;
     private int bestScore;
-    private List<Move> killerMoves = new List<Move>();
+    private Move[,] killerMoves = new Move[MAX_KILLER_PLY, 2];
     private int[,] historyMoves = new int[64, 64];
     private int cachedPieceCount = -1;
     private ulong lastBoardHash;
@@ -78,7 +79,7 @@ public class MyBot : IChessBot
         }
 
         // Initialization per turn
-        killerMoves.Clear();
+        Array.Clear(killerMoves, 0, killerMoves.Length);
         Array.Clear(historyMoves, 0, historyMoves.Length);
         negamaxPositions = 0;
         qsearchPositions = 0;
@@ -93,7 +94,6 @@ public class MyBot : IChessBot
         Move bestMove = legalMoves.Length > 0 ? legalMoves[0] : Move.NullMove;
         Move bestMoveThisIteration = bestMove;
 
-        // Handle trivial cases first
         if (legalMoves.Length == 0)
         {
             bestScore = board.IsInCheck() ? -InfiniteScore + 50 : 0;
@@ -144,7 +144,6 @@ public class MyBot : IChessBot
                 Move[] movesToOrder = OrderMoves(legalMoves, board, 0, previousBestMove);
                 if (movesToOrder.Length > 0) currentBestMoveAspiration = movesToOrder[0];
 
-                // --- Root Move Loop ---
                 for (int i = 0; i < movesToOrder.Length; i++)
                 {
                     Move move = movesToOrder[i];
@@ -162,7 +161,6 @@ public class MyBot : IChessBot
                         alpha = Math.Max(alpha, score);
                     }
 
-                    // Handle Beta Cutoff / Aspiration Failure
                     if (alpha >= beta)
                     {
                         if (useAspiration)
@@ -184,10 +182,10 @@ public class MyBot : IChessBot
                 {
                     if (currentBestScore <= alpha) // Check if it failed low
                     {
-                        alpha = -InfiniteScore; // Widen alpha
-                        beta = currentBestScore + aspirationWindow; // Reset beta
+                        alpha = -InfiniteScore;
+                        beta = currentBestScore + aspirationWindow;
                     }
-                    aspirationWindow *= 3; // Widen window
+                    aspirationWindow *= 3;
                 }
                 else // Aspiration successful (or not used)
                 {
@@ -201,10 +199,8 @@ public class MyBot : IChessBot
 
             } while (aspirationFailed && !timeIsUp); // Repeat if aspiration failed and time permits
 
-            // --- Iteration Completion ---
-            if (timeIsUp) break; // Exit ID loop if time ran out
+            if (timeIsUp) break;
 
-            // Update overall best move if iteration completed successfully
             if (!bestMoveThisIteration.IsNull)
             {
                 bestMove = bestMoveThisIteration;
@@ -232,7 +228,7 @@ public class MyBot : IChessBot
             bestMove = legalMoves[0];
         }
 
-        if (!ConstantDepth) LogEval(board, currentDepth, false); // Final log
+        if (!ConstantDepth) LogEval(board, currentDepth, false);
         return bestMove;
     }
 
@@ -328,37 +324,28 @@ public class MyBot : IChessBot
 
     private bool IsKillerMove(Move move, int ply)
     {
-        EnsureKillerMovesSize(ply);
-        int index0 = ply * 2;
-        int index1 = ply * 2 + 1;
+        // Check if ply is within the bounds of the killer move array
+        if (ply < 0 || ply >= MAX_KILLER_PLY)
+        {
+            return false; // Ply is out of supported range
+        }
         // Check if move matches either killer slot for the current ply
-        return (killerMoves.Count > index0 && move == killerMoves[index0]) ||
-               (killerMoves.Count > index1 && move == killerMoves[index1]);
+        return move == killerMoves[ply, 0] || move == killerMoves[ply, 1];
     }
 
     private void UpdateKillerMoves(Move move, int ply)
     {
-        if (move.IsCapture || move.IsPromotion) return; // Only for quiet moves
-
-        EnsureKillerMovesSize(ply);
-        int index0 = ply * 2;
-        int index1 = ply * 2 + 1;
+        // Only update for quiet moves and within supported ply range
+        if (move.IsCapture || move.IsPromotion || ply < 0 || ply >= MAX_KILLER_PLY)
+        {
+            return;
+        }
 
         // Shift killers if new move is different from the first killer
-        if (move != killerMoves[index0])
+        if (move != killerMoves[ply, 0])
         {
-            killerMoves[index1] = killerMoves[index0];
-            killerMoves[index0] = move;
-        }
-    }
-
-    // Ensure killer move list is large enough for the current ply
-    private void EnsureKillerMovesSize(int ply)
-    {
-        int requiredSize = (ply * 2) + 2;
-        while (killerMoves.Count < requiredSize)
-        {
-            killerMoves.Add(Move.NullMove);
+            killerMoves[ply, 1] = killerMoves[ply, 0]; // Shift killer 1 to slot 2
+            killerMoves[ply, 0] = move;                // Put new killer in slot 1
         }
     }
 
@@ -412,7 +399,7 @@ public class MyBot : IChessBot
             if (ttEntry.Flag == ALPHA && ttScore <= alpha) return alpha;
             if (ttEntry.Flag == BETA && ttScore >= beta) return beta;
         }
-        if (ttHit) ttMove = ttEntry.BestMove; // Use TT move hint for ordering
+        if (ttHit) ttMove = ttEntry.BestMove;
 
         // Base Case: Quiescence Search
         if (depth <= 0)
@@ -431,13 +418,9 @@ public class MyBot : IChessBot
         // Static Evaluation for Pruning (calculated lazily)
         int standPat = 0;
         bool inCheck = board.IsInCheck();
-
-        // Determine if eval is needed for pruning techniques
-        bool needEvalForPruning = (!inCheck && (depth <= 3 || depth >= 3)); // Simplified
+        bool needEvalForPruning = !inCheck; // Simpler: eval always needed for NMP/Futility/Razoring if not in check
         if (needEvalForPruning) standPat = Evaluate(board);
 
-        // --- Pruning Techniques ---
-        // Null Move Pruning (NMP)
         if (!inCheck && depth >= 3 && ply > 0 && !IsEndgame(board) && Math.Abs(standPat) < CHECKMATE_SCORE_THRESHOLD)
         {
             board.ForceSkipTurn();
@@ -465,14 +448,12 @@ public class MyBot : IChessBot
                 return Quiescence(board, alpha, beta, ply, 0); // Fall back to QSearch
             }
         }
-        // --- End Pruning ---
 
         moves = OrderMoves(moves, board, ply, ttMove); // Order moves using heuristics
         int originalAlpha = alpha;
         Move bestMove = Move.NullMove;
         int localBestScore = -InfiniteScore;
 
-        // --- Search Moves Loop ---
         for (int i = 0; i < moves.Length; i++)
         {
             Move move = moves[i];
@@ -519,19 +500,18 @@ public class MyBot : IChessBot
                 bestMove = move;
                 alpha = Math.Max(alpha, score);
 
-                // Beta Cutoff Check
                 if (alpha >= beta)
                 {
                     if (isQuiet) // Update killers/history only for quiet moves causing cutoff
                     {
                         UpdateKillerMoves(move, ply);
-                        UpdateHistoryMove(move, depth * depth); // Use depth^2 bonus
+                        UpdateHistoryMove(move, depth * depth);
                     }
                     AddTT(key, depth, AdjustMateScoreForStorage(beta, ply, realPly), BETA, move);
-                    return beta; // Fail high
+                    return beta;
                 }
             }
-        } // --- End Search Moves Loop ---
+        }
 
         // Store result in Transposition Table
         byte flag = localBestScore <= originalAlpha ? ALPHA : EXACT;
@@ -550,28 +530,22 @@ public class MyBot : IChessBot
         if (standPat >= beta) return beta;
         if (standPat > alpha) alpha = standPat;
 
-        // Get only capture moves for quiescence search
-        Move[] captures = board.GetLegalMoves(true); // Use the captures directly
-
-        // Order the capture moves
+        Move[] captures = board.GetLegalMoves(true);
         Move[] orderedMoves = OrderMoves(captures, board, ply);
 
         foreach (Move move in orderedMoves)
         {
-            // Optional: Delta Pruning could be added here before MakeMove if desired
-            // E.g., if (standPat + PieceValues[capturedPiece] + SAFETY_MARGIN < alpha) continue;
-
             board.MakeMove(move);
             int score = -Quiescence(board, -beta, -alpha, ply + 1, qDepth + 1);
             board.UndoMove(move);
 
             if (timeIsUp) return 0;
 
-            if (score >= beta) return beta; // Fail high
-            if (score > alpha) alpha = score; // Update lower bound
+            if (score >= beta) return beta;
+            if (score > alpha) alpha = score;
         }
 
-        return alpha; // Return best score found, or standPat if no captures improved alpha
+        return alpha;
     }
 
     private int Evaluate(Board board)
@@ -611,7 +585,7 @@ public class MyBot : IChessBot
                 // Endgame Pawn Advancement Bonus
                 if (isEndgame && p.PieceType == PieceType.Pawn)
                 {
-                    int advancementBonus = p.IsWhite ? rank : (7 - rank); // How far advanced (0-6)
+                    int advancementBonus = p.IsWhite ? rank : (7 - rank);
                     score += pieceSign * advancementBonus * 5;
                 }
             }
@@ -669,19 +643,18 @@ public class MyBot : IChessBot
         return isCheckmate;
     }
 
-    // --- Transposition Table Logic ---
     private struct TTEntry
     {
         public ulong Key;
         public short Depth;
-        public short Score; // Adjusted for mate distance from root
-        public byte Flag;   // EXACT, ALPHA, BETA
+        public short Score;
+        public byte Flag;
         public Move BestMove;
     }
 
     private const byte EXACT = 0;
-    private const byte ALPHA = 1; // Upper bound (score <= alpha)
-    private const byte BETA = 2;  // Lower bound (score >= beta)
+    private const byte ALPHA = 1;
+    private const byte BETA = 2;
 
     private int GetTTIndex(ulong key) => (int)(key & ttMask);
 

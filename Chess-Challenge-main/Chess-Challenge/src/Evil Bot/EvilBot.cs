@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Numerics;
 
 // v1.9.2 Set isEndgame theshold to 11 pieces
-public class MyBot : IChessBot
+public class EvilBot : IChessBot
 {
     // Search Parameters
     private const bool ConstantDepth = false;
