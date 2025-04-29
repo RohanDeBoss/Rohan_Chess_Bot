@@ -3,12 +3,17 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v2.0 Switched killer moves to fixed-size array + Cleanup
+// v2.0.1 small tweaks to aspiration windows + bool for debugging
 public class MyBot : IChessBot
 {
-    // Search Parameters
+    // Time management flags
     private const bool ConstantDepth = false;
     private const short MaxDepth = 5; // Used when ConstantDepth is true
+
+    private const bool UseFixedTimePerMove = false; // Flag to enable fixed time per move
+    private const int FixedTimePerMoveMs = 500;   // Fixed time (if flag is true)
+
+    // More constants
     private const short MaxSafetyDepth = 99;
     private const int InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22; // Approx 4 million entries
@@ -104,19 +109,34 @@ public class MyBot : IChessBot
             return HandleForcedMove(legalMoves[0], board, 1, true);
         }
 
-        // Time Allocation
-        short timeFraction = Math.Max(GetTimeSpentFraction(timer), (short)1);
-        int allocatedTime = ConstantDepth
-            ? int.MaxValue
-            : Math.Max(10, (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 4) - SAFETY_MARGIN);
+        // --- Time Allocation ---
+        int allocatedTime;
+        if (UseFixedTimePerMove)
+        {
+            allocatedTime = Math.Min(FixedTimePerMoveMs, timer.MillisecondsRemaining - SAFETY_MARGIN);
+            allocatedTime = Math.Max(1, allocatedTime); // Keep: Ensure minimum 1ms
+        }
+        else if (ConstantDepth)
+        {
+            allocatedTime = int.MaxValue;
+        }
+        else
+        {
+            short timeFraction = Math.Max(GetTimeSpentFraction(timer), (short)1);
+            allocatedTime = (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 3);
+            allocatedTime = Math.Max(10, allocatedTime - SAFETY_MARGIN);
+            allocatedTime = Math.Min(allocatedTime, timer.MillisecondsRemaining - SAFETY_MARGIN);
+            allocatedTime = Math.Max(1, allocatedTime); // Keep: Ensure minimum 1ms
+        }
         absoluteTimeLimit = timer.MillisecondsElapsedThisTurn + allocatedTime;
+        // --- End Time Allocation ---
 
         // --- Iterative Deepening Loop ---
         while (depth <= MaxSafetyDepth && (ConstantDepth ? depth <= MaxDepth : true))
         {
             // Check time before starting a new depth
             if (timeIsUp) break;
-            if (!ConstantDepth && currentTimer.MillisecondsRemaining <= SAFETY_MARGIN * 2) break;
+            if (!ConstantDepth && !UseFixedTimePerMove && currentTimer.MillisecondsElapsedThisTurn >= absoluteTimeLimit - SAFETY_MARGIN * 2) break;
 
             currentDepth = depth;
             bestMoveThisIteration = Move.NullMove;
@@ -166,7 +186,7 @@ public class MyBot : IChessBot
                         if (useAspiration)
                         {
                             aspirationFailed = true;
-                            alpha = currentBestScore - aspirationWindow; // Reset alpha, keep current score
+                            alpha = currentBestScore - aspirationWindow; // Keep current score, widen bounds later
                             beta = InfiniteScore; // Widen beta for re-search
                         }
                         if (!aspirationFailed) break; // Normal beta cutoff
@@ -177,15 +197,21 @@ public class MyBot : IChessBot
 
                 if (timeIsUp) break; // Exit aspiration loop
 
-                // Handle Aspiration Window Re-search
+                // Handle Aspiration Window Re-search (Keep v2.1 logic)
                 if (aspirationFailed)
                 {
-                    if (currentBestScore <= alpha) // Check if it failed low
+                    // If score <= original alpha (failed low)
+                    if (currentBestScore <= previousBestScore - aspirationWindow)
                     {
-                        alpha = -InfiniteScore;
-                        beta = currentBestScore + aspirationWindow;
+                        alpha = -InfiniteScore; // Widen alpha significantly
+                        beta = currentBestScore + aspirationWindow; // Re-center beta around actual score
                     }
-                    aspirationWindow *= 3;
+                    else // Failed high (score >= original beta)
+                    {
+                        alpha = currentBestScore - aspirationWindow; // Re-center alpha
+                        beta = InfiniteScore; // Widen beta significantly
+                    }
+                    aspirationWindow *= 3; // Increase window size for re-search
                 }
                 else // Aspiration successful (or not used)
                 {
@@ -239,6 +265,7 @@ public class MyBot : IChessBot
 
     private void LogEval(Board board, int depth, bool isForcedMove)
     {
+        if (currentTimer != null && currentTimer.MillisecondsElapsedThisTurn > absoluteTimeLimit && !isForcedMove && depth <= 1) return;
         if (currentTimer != null && currentTimer.MillisecondsRemaining <= 0 && !isForcedMove) return;
 
         if (isForcedMove)
@@ -248,7 +275,7 @@ public class MyBot : IChessBot
         else
         {
             Console.WriteLine();
-            DebugLog($"Depth: {depth}");
+            DebugLog($"Depth: {depth - 1}"); // Keep: Log completed depth
             string mateInfo = GetMateInMoves(bestScore) ?? "No mate found";
             DebugLog(mateInfo);
             DebugLog($"Eval: {bestScore * (board.IsWhiteToMove ? 1 : -1)}"); // Eval from white's perspective
@@ -289,16 +316,18 @@ public class MyBot : IChessBot
             if (move.IsCapture)
             {
                 Piece capturedPiece = board.GetPiece(move.TargetSquare);
-                int capturedValue;
+                int capturedValue = 0; // Initialize
 
-                if (capturedPiece.PieceType == PieceType.None) // Handle En Passant
+                if (move.IsEnPassant) // Handle En Passant explicitly
                 {
                     capturedValue = PieceValues[(int)PieceType.Pawn - 1];
                 }
-                else
+                else if (capturedPiece.PieceType != PieceType.None)
                 {
                     capturedValue = PieceValues[(int)capturedPiece.PieceType - 1];
                 }
+                // Removed redundant else { capturedValue = 0; }
+
                 int attackerValue = PieceValues[(int)board.GetPiece(move.StartSquare).PieceType - 1];
                 score += CAPTURE_BASE_BONUS + capturedValue * MVV_LVA_MULTIPLIER - attackerValue; // MVV-LVA
             }
@@ -462,7 +491,7 @@ public class MyBot : IChessBot
 
             int newDepth = depth - 1;
             // Check Extension
-            if (givesCheck && newDepth < MaxSafetyDepth - 1) newDepth = Math.Min(MaxSafetyDepth, newDepth + 1);
+            if (givesCheck && newDepth < MaxSafetyDepth - 1) newDepth = Math.Min(MaxSafetyDepth - 1, newDepth + 1); // Corrected MaxSafetyDepth
 
             // Late Move Reductions (LMR)
             int score;
