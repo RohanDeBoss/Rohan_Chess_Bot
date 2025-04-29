@@ -49,12 +49,12 @@ using System.Collections.Generic;
 
 #endregion
 
-public class Bot_106 : IChessBot
+public class EvilBot : IChessBot
 {
     #region ** MAIN **
 
     //Initialize Bot
-    public Bot_106()
+    public EvilBot()
     {
         //Precalculate the early to endgame transition
         int index = 0;

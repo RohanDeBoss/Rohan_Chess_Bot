@@ -3,7 +3,7 @@ using System;
 using static ChessChallenge.API.BitboardHelper;
 using static System.Math;
 
-public class MyBot : IChessBot
+public class EvilBot : IChessBot
 {
     public int maxSearchTime, searchingDepth, lastScore;
 

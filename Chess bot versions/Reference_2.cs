@@ -5,7 +5,7 @@ using System.Data;
 using System.Numerics;
 
 //Fresh start
-public class MyBot : IChessBot
+public class EvilBot : IChessBot
 {
     // Piece values: null, pawn, knight, bishop, rook, queen, king
     int[] pieceValues = { 0, 100, 300, 300, 500, 900, 10000 };

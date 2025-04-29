@@ -3,16 +3,21 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v2.0 Switched killer moves to fixed-size array + Cleanup
+// v2.0.3 Small improvements / Cleanup
 public class EvilBot : IChessBot
 {
-    // Search Parameters
-    private const bool ConstantDepth = false;
-    private const short MaxDepth = 5; // Used when ConstantDepth is true
+    // Time management flags
+    private static readonly bool ConstantDepth = false;
+    private static readonly short MaxDepth = 5; // Used when ConstantDepth is true
+
+    private static readonly bool UseFixedTimePerMove = false; // Flag to enable fixed time per move
+    private static readonly int FixedTimePerMoveMs = 150;   // Fixed time if flag is true (Don't set below 15ms)
+
+    // More constants
     private const short MaxSafetyDepth = 99;
     private const int InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22; // Approx 4 million entries
-    private const int MAX_KILLER_PLY = 100; // Define max ply for killer moves array
+    private const int MAX_KILLER_PLY = 200; // Define max ply for killer moves array
 
     // Move Ordering Bonuses
     private const int TT_MOVE_BONUS = 10_000_000;
@@ -28,11 +33,11 @@ public class EvilBot : IChessBot
     private const int MAX_ASPIRATION_DEPTH = 3;
     private const int CHECKMATE_SCORE_THRESHOLD = 25000; // Eval cutoff for mate scores
     private const int SAFETY_MARGIN = 15; // Small time buffer in ms
-    private const int TIME_CHECK_NODES = 2048; // How often to check the time
+    private const int TIME_CHECK_NODES = 200; // How often to check the time
 
     // Static Fields
     private TTEntry[] tt = new TTEntry[TT_SIZE];
-    private readonly ulong ttMask = (ulong)(TT_SIZE - 1);
+    private readonly ulong ttMask = TT_SIZE - 1;
     private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 }; // P, N, B, R, Q, K
 
     // Instance Fields
@@ -104,19 +109,34 @@ public class EvilBot : IChessBot
             return HandleForcedMove(legalMoves[0], board, 1, true);
         }
 
-        // Time Allocation
-        short timeFraction = Math.Max(GetTimeSpentFraction(timer), (short)1);
-        int allocatedTime = ConstantDepth
-            ? int.MaxValue
-            : Math.Max(10, (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 4) - SAFETY_MARGIN);
+        // --- Time Allocation ---
+        int allocatedTime;
+        if (UseFixedTimePerMove)
+        {
+            allocatedTime = Math.Min(FixedTimePerMoveMs, timer.MillisecondsRemaining - SAFETY_MARGIN);
+            allocatedTime = Math.Max(1, allocatedTime); // Keep: Ensure minimum 1ms
+        }
+        else if (ConstantDepth)
+        {
+            allocatedTime = int.MaxValue;
+        }
+        else
+        {
+            short timeFraction = Math.Max(GetTimeSpentFraction(timer), (short)1);
+            allocatedTime = (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 3);
+            allocatedTime = Math.Max(10, allocatedTime - SAFETY_MARGIN);
+            allocatedTime = Math.Min(allocatedTime, timer.MillisecondsRemaining - SAFETY_MARGIN);
+            allocatedTime = Math.Max(1, allocatedTime); // Keep: Ensure minimum 1ms
+        }
         absoluteTimeLimit = timer.MillisecondsElapsedThisTurn + allocatedTime;
+        // --- End Time Allocation ---
 
         // --- Iterative Deepening Loop ---
         while (depth <= MaxSafetyDepth && (ConstantDepth ? depth <= MaxDepth : true))
         {
             // Check time before starting a new depth
             if (timeIsUp) break;
-            if (!ConstantDepth && currentTimer.MillisecondsRemaining <= SAFETY_MARGIN * 2) break;
+            if (!ConstantDepth && !UseFixedTimePerMove && currentTimer.MillisecondsElapsedThisTurn >= absoluteTimeLimit - SAFETY_MARGIN * 2) break;
 
             currentDepth = depth;
             bestMoveThisIteration = Move.NullMove;
@@ -166,7 +186,7 @@ public class EvilBot : IChessBot
                         if (useAspiration)
                         {
                             aspirationFailed = true;
-                            alpha = currentBestScore - aspirationWindow; // Reset alpha, keep current score
+                            alpha = currentBestScore - aspirationWindow; // Keep current score, widen bounds later
                             beta = InfiniteScore; // Widen beta for re-search
                         }
                         if (!aspirationFailed) break; // Normal beta cutoff
@@ -177,15 +197,21 @@ public class EvilBot : IChessBot
 
                 if (timeIsUp) break; // Exit aspiration loop
 
-                // Handle Aspiration Window Re-search
+                // Handle Aspiration Window Re-search (Keep v2.1 logic)
                 if (aspirationFailed)
                 {
-                    if (currentBestScore <= alpha) // Check if it failed low
+                    // If score <= original alpha (failed low)
+                    if (currentBestScore <= previousBestScore - aspirationWindow)
                     {
-                        alpha = -InfiniteScore;
-                        beta = currentBestScore + aspirationWindow;
+                        alpha = -InfiniteScore; // Widen alpha significantly
+                        beta = currentBestScore + aspirationWindow; // Re-center beta around actual score
                     }
-                    aspirationWindow *= 3;
+                    else // Failed high (score >= original beta)
+                    {
+                        alpha = currentBestScore - aspirationWindow; // Re-center alpha
+                        beta = InfiniteScore; // Widen beta significantly
+                    }
+                    aspirationWindow *= 3; // Increase window size for re-search
                 }
                 else // Aspiration successful (or not used)
                 {
@@ -239,6 +265,7 @@ public class EvilBot : IChessBot
 
     private void LogEval(Board board, int depth, bool isForcedMove)
     {
+        if (currentTimer != null && currentTimer.MillisecondsElapsedThisTurn > absoluteTimeLimit && !isForcedMove && depth <= 1) return;
         if (currentTimer != null && currentTimer.MillisecondsRemaining <= 0 && !isForcedMove) return;
 
         if (isForcedMove)
@@ -248,7 +275,7 @@ public class EvilBot : IChessBot
         else
         {
             Console.WriteLine();
-            DebugLog($"Depth: {depth}");
+            DebugLog($"Depth: {depth}"); // Keep: Log completed depth
             string mateInfo = GetMateInMoves(bestScore) ?? "No mate found";
             DebugLog(mateInfo);
             DebugLog($"Eval: {bestScore * (board.IsWhiteToMove ? 1 : -1)}"); // Eval from white's perspective
@@ -289,16 +316,18 @@ public class EvilBot : IChessBot
             if (move.IsCapture)
             {
                 Piece capturedPiece = board.GetPiece(move.TargetSquare);
-                int capturedValue;
+                int capturedValue = 0; // Initialize
 
-                if (capturedPiece.PieceType == PieceType.None) // Handle En Passant
+                if (move.IsEnPassant) // Handle En Passant explicitly
                 {
                     capturedValue = PieceValues[(int)PieceType.Pawn - 1];
                 }
-                else
+                else if (capturedPiece.PieceType != PieceType.None)
                 {
                     capturedValue = PieceValues[(int)capturedPiece.PieceType - 1];
                 }
+                // Removed redundant else { capturedValue = 0; }
+
                 int attackerValue = PieceValues[(int)board.GetPiece(move.StartSquare).PieceType - 1];
                 score += CAPTURE_BASE_BONUS + capturedValue * MVV_LVA_MULTIPLIER - attackerValue; // MVV-LVA
             }
@@ -462,7 +491,7 @@ public class EvilBot : IChessBot
 
             int newDepth = depth - 1;
             // Check Extension
-            if (givesCheck && newDepth < MaxSafetyDepth - 1) newDepth = Math.Min(MaxSafetyDepth, newDepth + 1);
+            if (givesCheck && newDepth < MaxSafetyDepth - 1) newDepth = Math.Min(MaxSafetyDepth - 1, newDepth + 1); // Corrected MaxSafetyDepth
 
             // Late Move Reductions (LMR)
             int score;
@@ -626,21 +655,13 @@ public class EvilBot : IChessBot
         return cachedPieceCount <= endgameTotalPieceThreshold;
     }
 
-    private Move HandleForcedMove(Move move, Board board, int forcedDepth, bool isForcedMove, int? overrideScore = null)
+    private Move HandleForcedMove(Move move, Board board, int forcedDepth, bool isForcedMove)
     {
         // Handle single legal moves or immediate checkmates
-        bestScore = overrideScore ?? -Evaluate(board);
+        bestScore = -Evaluate(board);
         currentDepth = forcedDepth;
         LogEval(board, forcedDepth, isForcedMove);
         return move;
-    }
-
-    private bool IsCheckmateMove(Move move, Board board)
-    {
-        board.MakeMove(move);
-        bool isCheckmate = board.IsInCheckmate();
-        board.UndoMove(move);
-        return isCheckmate;
     }
 
     private struct TTEntry
@@ -675,25 +696,18 @@ public class EvilBot : IChessBot
     }
 
     // Adjust TT mate score based on current ply vs stored ply (relative to root)
-    private short AdjustMateScore(short score, int currentPly, int rootPly)
-    {
-        if (Math.Abs(score) > CHECKMATE_SCORE_THRESHOLD)
-        {
-            int sign = Math.Sign(score);
-            return (short)(score - sign * (currentPly - rootPly) * 50);
-        }
-        return score;
-    }
-
-    // Adjust mate score for TT storage (make it relative to root ply)
     private short AdjustMateScoreForStorage(int score, int currentPly, int rootPly)
     {
         if (Math.Abs(score) > CHECKMATE_SCORE_THRESHOLD)
         {
-            int sign = Math.Sign(score);
-            return (short)(score + sign * (currentPly - rootPly) * 50);
+            return (short)Math.Clamp(score, -InfiniteScore + 50, InfiniteScore - 50);
         }
         return (short)score;
+    }
+
+    private short AdjustMateScore(short score, int currentPly, int rootPly)
+    {
+        return score;
     }
 
     // -- Piece Square Tables --
