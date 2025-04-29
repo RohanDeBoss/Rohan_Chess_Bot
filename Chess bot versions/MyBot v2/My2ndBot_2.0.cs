@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v2.0.1 small tweaks to aspiration windows + bool for debugging
+// v2.0.2 remove redundant code
 public class MyBot : IChessBot
 {
     // Time management flags
@@ -655,21 +655,13 @@ public class MyBot : IChessBot
         return cachedPieceCount <= endgameTotalPieceThreshold;
     }
 
-    private Move HandleForcedMove(Move move, Board board, int forcedDepth, bool isForcedMove, int? overrideScore = null)
+    private Move HandleForcedMove(Move move, Board board, int forcedDepth, bool isForcedMove)
     {
         // Handle single legal moves or immediate checkmates
-        bestScore = overrideScore ?? -Evaluate(board);
+        bestScore = -Evaluate(board);
         currentDepth = forcedDepth;
         LogEval(board, forcedDepth, isForcedMove);
         return move;
-    }
-
-    private bool IsCheckmateMove(Move move, Board board)
-    {
-        board.MakeMove(move);
-        bool isCheckmate = board.IsInCheckmate();
-        board.UndoMove(move);
-        return isCheckmate;
     }
 
     private struct TTEntry
