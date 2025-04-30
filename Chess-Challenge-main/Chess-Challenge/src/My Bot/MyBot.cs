@@ -3,15 +3,15 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v2.0.3 Small improvements / Cleanup
+// v2.0.4 Small improvements / Cleanup
 public class MyBot : IChessBot
 {
     // Time management flags
-    private static readonly bool ConstantDepth = false;
-    private static readonly short MaxDepth = 5; // Used when ConstantDepth is true
+    private static readonly bool ConstantDepth = true;
+    private static readonly short MaxDepth = 15; // Used when ConstantDepth is true
 
     private static readonly bool UseFixedTimePerMove = false; // Flag to enable fixed time per move
-    private static readonly int FixedTimePerMoveMs = 150;   // Fixed time if flag is true (Don't set below 15ms)
+    private static readonly int FixedTimePerMoveMs = 1050;   // Fixed time if flag is true (Don't set below 15ms)
 
     // More constants
     private const short MaxSafetyDepth = 99;
@@ -55,6 +55,7 @@ public class MyBot : IChessBot
 
     private void CheckTime()
     {
+        if (ConstantDepth) return; // Skip time check when ConstantDepth is true
         // Check time limit frequently but not excessively based on node count
         if ((negamaxPositions + qsearchPositions) % TIME_CHECK_NODES == 0)
         {
@@ -77,7 +78,7 @@ public class MyBot : IChessBot
         currentTimer = timer;
         timeIsUp = false;
 
-        if (timer.MillisecondsRemaining <= 0)
+        if (timer.MillisecondsRemaining <= 0 && !ConstantDepth)
         {
             var moves = board.GetLegalMoves();
             return moves.Length > 0 ? moves[0] : Move.NullMove;
@@ -118,7 +119,8 @@ public class MyBot : IChessBot
         }
         else if (ConstantDepth)
         {
-            allocatedTime = int.MaxValue;
+            allocatedTime = int.MaxValue; // Use a large value to allow full depth search
+            DebugLog($"Starting constant depth search to {MaxDepth}");
         }
         else
         {
@@ -136,7 +138,7 @@ public class MyBot : IChessBot
         {
             // Check time before starting a new depth
             if (timeIsUp) break;
-            if (!ConstantDepth && !UseFixedTimePerMove && currentTimer.MillisecondsElapsedThisTurn >= absoluteTimeLimit - SAFETY_MARGIN * 2) break;
+            if (!ConstantDepth && currentTimer.MillisecondsElapsedThisTurn >= absoluteTimeLimit - SAFETY_MARGIN * 2) break;
 
             currentDepth = depth;
             bestMoveThisIteration = Move.NullMove;
@@ -231,6 +233,10 @@ public class MyBot : IChessBot
             {
                 bestMove = bestMoveThisIteration;
                 previousBestMove = bestMove;
+                string timeDisplay = currentTimer.MillisecondsElapsedThisTurn <= 9999
+                    ? $"{currentTimer.MillisecondsElapsedThisTurn}ms"
+                    : $"{(currentTimer.MillisecondsElapsedThisTurn / 1000.0):F2}s";
+                DebugLog($"Depth {depth} nodes {negamaxPositions + qsearchPositions}, Time {timeDisplay}");
             }
             else
             {
@@ -254,7 +260,7 @@ public class MyBot : IChessBot
             bestMove = legalMoves[0];
         }
 
-        if (!ConstantDepth) LogEval(board, currentDepth, false);
+        LogEval(board, currentDepth, false); // Always log at the end, even in ConstantDepth mode
         return bestMove;
     }
 
@@ -265,14 +271,8 @@ public class MyBot : IChessBot
 
     private void LogEval(Board board, int depth, bool isForcedMove)
     {
-        if (currentTimer != null && currentTimer.MillisecondsElapsedThisTurn > absoluteTimeLimit && !isForcedMove && depth <= 1) return;
-        if (currentTimer != null && currentTimer.MillisecondsRemaining <= 0 && !isForcedMove) return;
-
-        if (isForcedMove)
-        {
-            Console.WriteLine($"\n{GetType().Name}: FORCED MOVE!");
-        }
-        else
+        // Simplified condition to ensure logging in ConstantDepth mode
+        if (!isForcedMove && currentTimer != null && (ConstantDepth || (currentTimer.MillisecondsElapsedThisTurn <= absoluteTimeLimit && currentTimer.MillisecondsRemaining > 0)))
         {
             Console.WriteLine();
             DebugLog($"Depth: {depth}"); // Keep: Log completed depth
@@ -280,6 +280,11 @@ public class MyBot : IChessBot
             DebugLog(mateInfo);
             DebugLog($"Eval: {bestScore * (board.IsWhiteToMove ? 1 : -1)}"); // Eval from white's perspective
             DebugLog($"Nodes: {negamaxPositions + qsearchPositions:N0}");
+            DebugLog($"Time: {currentTimer.MillisecondsElapsedThisTurn}ms");
+        }
+        else if (isForcedMove)
+        {
+            Console.WriteLine($"\n{GetType().Name}: FORCED MOVE!");
         }
     }
 
