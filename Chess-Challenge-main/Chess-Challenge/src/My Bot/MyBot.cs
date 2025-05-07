@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v2.1 Code refractor + Cleanup + Debugging fixes & Customization
+// v2.2.a testing
 public class MyBot : IChessBot
 {
     // Time management flags

@@ -3,15 +3,17 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v2.0.3 Small improvements / Cleanup
+// v2.1 Code refractor + Cleanup + Debugging fixes & Customization
 public class EvilBot : IChessBot
 {
     // Time management flags
     private static readonly bool ConstantDepth = false;
-    private static readonly short MaxDepth = 5; // Used when ConstantDepth is true
+    private static readonly short MaxDepth = 11; // Used when ConstantDepth is true
 
-    private static readonly bool UseFixedTimePerMove = false; // Flag to enable fixed time per move
-    private static readonly int FixedTimePerMoveMs = 150;   // Fixed time if flag is true (Don't set below 15ms)
+    private static readonly bool UseFixedTimePerMove = false; // Flag to enable fixed time per move (If constantDepth is false, otherwise ignored)
+    private static readonly int FixedTimePerMoveMs = 200;   // Fixed time if flag is true (min 50ms)
+
+    private static readonly bool PerDepthDebugging = false; // Flag to enable per-depth debugging
 
     // More constants
     private const short MaxSafetyDepth = 99;
@@ -33,7 +35,7 @@ public class EvilBot : IChessBot
     private const int MAX_ASPIRATION_DEPTH = 3;
     private const int CHECKMATE_SCORE_THRESHOLD = 25000; // Eval cutoff for mate scores
     private const int SAFETY_MARGIN = 15; // Small time buffer in ms
-    private const int TIME_CHECK_NODES = 200; // How often to check the time
+    private const int TIME_CHECK_NODES = 100; // How often to check the time
 
     // Static Fields
     private TTEntry[] tt = new TTEntry[TT_SIZE];
@@ -55,6 +57,7 @@ public class EvilBot : IChessBot
 
     private void CheckTime()
     {
+        if (ConstantDepth) return; // Skip time check when ConstantDepth is true
         // Check time limit frequently but not excessively based on node count
         if ((negamaxPositions + qsearchPositions) % TIME_CHECK_NODES == 0)
         {
@@ -72,12 +75,26 @@ public class EvilBot : IChessBot
         return (short)Math.Max(26, Math.Min(65, result));
     }
 
+    private int AllocateTime(Timer timer)
+    {
+        if (ConstantDepth)
+            return int.MaxValue; // Use a large value to allow full depth search
+        if (UseFixedTimePerMove)
+            return Math.Max(1, Math.Min(FixedTimePerMoveMs, timer.MillisecondsRemaining - SAFETY_MARGIN));
+
+        short timeFraction = Math.Max(GetTimeSpentFraction(timer), (short)1);
+        int allocated = (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 3);
+        allocated = Math.Max(10, allocated - SAFETY_MARGIN);
+        allocated = Math.Min(allocated, timer.MillisecondsRemaining - SAFETY_MARGIN);
+        return Math.Max(1, allocated);
+    }
+
     public Move Think(Board board, Timer timer)
     {
         currentTimer = timer;
         timeIsUp = false;
 
-        if (timer.MillisecondsRemaining <= 0)
+        if (timer.MillisecondsRemaining <= 0 && !ConstantDepth)
         {
             var moves = board.GetLegalMoves();
             return moves.Length > 0 ? moves[0] : Move.NullMove;
@@ -109,50 +126,36 @@ public class EvilBot : IChessBot
             return HandleForcedMove(legalMoves[0], board, 1, true);
         }
 
+        // Debug logging for search start
+        if (PerDepthDebugging)
+        {
+            Console.WriteLine("");
+            if (ConstantDepth)
+                DebugLog($"Starting constant depth search to {MaxDepth}:");
+            else
+                DebugLog($"Starting search for timed move:");
+        }
+
         // --- Time Allocation ---
-        int allocatedTime;
-        if (UseFixedTimePerMove)
-        {
-            allocatedTime = Math.Min(FixedTimePerMoveMs, timer.MillisecondsRemaining - SAFETY_MARGIN);
-            allocatedTime = Math.Max(1, allocatedTime); // Keep: Ensure minimum 1ms
-        }
-        else if (ConstantDepth)
-        {
-            allocatedTime = int.MaxValue;
-        }
-        else
-        {
-            short timeFraction = Math.Max(GetTimeSpentFraction(timer), (short)1);
-            allocatedTime = (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 3);
-            allocatedTime = Math.Max(10, allocatedTime - SAFETY_MARGIN);
-            allocatedTime = Math.Min(allocatedTime, timer.MillisecondsRemaining - SAFETY_MARGIN);
-            allocatedTime = Math.Max(1, allocatedTime); // Keep: Ensure minimum 1ms
-        }
-        absoluteTimeLimit = timer.MillisecondsElapsedThisTurn + allocatedTime;
+        absoluteTimeLimit = timer.MillisecondsElapsedThisTurn + AllocateTime(timer);
         // --- End Time Allocation ---
 
         // --- Iterative Deepening Loop ---
         while (depth <= MaxSafetyDepth && (ConstantDepth ? depth <= MaxDepth : true))
         {
             // Check time before starting a new depth
-            if (timeIsUp) break;
-            if (!ConstantDepth && !UseFixedTimePerMove && currentTimer.MillisecondsElapsedThisTurn >= absoluteTimeLimit - SAFETY_MARGIN * 2) break;
+            if (timeIsUp || (!ConstantDepth && currentTimer.MillisecondsElapsedThisTurn >= absoluteTimeLimit - SAFETY_MARGIN * 2))
+                break;
 
             currentDepth = depth;
             bestMoveThisIteration = Move.NullMove;
 
             bool useAspiration = depth > MAX_ASPIRATION_DEPTH && Math.Abs(previousBestScore) < CHECKMATE_SCORE_THRESHOLD;
-            int alpha = -InfiniteScore;
-            int beta = InfiniteScore;
+            int alpha = useAspiration ? previousBestScore - INITIAL_ASPIRATION_WINDOW : -InfiniteScore;
+            int beta = useAspiration ? previousBestScore + INITIAL_ASPIRATION_WINDOW : InfiniteScore;
             int aspirationWindow = INITIAL_ASPIRATION_WINDOW;
             bool aspirationFailed;
-            int currentBestScore = -InfiniteScore;
-
-            if (useAspiration)
-            {
-                alpha = previousBestScore - aspirationWindow;
-                beta = previousBestScore + aspirationWindow;
-            }
+            int currentBestScore;
 
             // --- Aspiration Window Loop ---
             do
@@ -167,7 +170,6 @@ public class EvilBot : IChessBot
                 for (int i = 0; i < movesToOrder.Length; i++)
                 {
                     Move move = movesToOrder[i];
-
                     board.MakeMove(move);
                     int score = -Negamax(board, depth - 1, -beta, -alpha, 1, 1);
                     board.UndoMove(move);
@@ -194,8 +196,7 @@ public class EvilBot : IChessBot
                 } // --- End Root Move Loop ---
 
             EndRootMoveLoop:;
-
-                if (timeIsUp) break; // Exit aspiration loop
+                if (timeIsUp) break;
 
                 // Handle Aspiration Window Re-search (Keep v2.1 logic)
                 if (aspirationFailed)
@@ -218,9 +219,7 @@ public class EvilBot : IChessBot
                     previousBestScore = currentBestScore;
                     bestScore = currentBestScore;
                     if (!currentBestMoveAspiration.IsNull)
-                    {
                         bestMoveThisIteration = currentBestMoveAspiration;
-                    }
                 }
 
             } while (aspirationFailed && !timeIsUp); // Repeat if aspiration failed and time permits
@@ -231,30 +230,24 @@ public class EvilBot : IChessBot
             {
                 bestMove = bestMoveThisIteration;
                 previousBestMove = bestMove;
+                string timeDisplay = currentTimer.MillisecondsElapsedThisTurn <= 9999 ? $"{currentTimer.MillisecondsElapsedThisTurn}ms" : $"{(currentTimer.MillisecondsElapsedThisTurn / 1000.0):F1}s";
+                long totalNodes = negamaxPositions + qsearchPositions;
+                string nodesDisplay = totalNodes < 10000 ? $"{totalNodes}" : totalNodes < 10000000 ? $"{(totalNodes / 1000.0):F1}k" : $"{(totalNodes / 1000000.0):F1}m";
+
+                if (PerDepthDebugging)
+                    DebugLog($"Depth {depth}, Nodes {nodesDisplay}, Time {timeDisplay}");
             }
             else
-            {
-                // If iteration failed to find a move (likely due to time out), use previous best
-                break;
-            }
-
-            // Optional: Stop early if a checkmate is found
-            if (Math.Abs(bestScore) > CHECKMATE_SCORE_THRESHOLD && !ConstantDepth)
-            {
-                break;
-            }
+                break; // If iteration failed to find a move (likely due to time out), use previous best
 
             depth++;
-
         } // --- End Iterative Deepening Loop ---
 
         // Fallback if no move was ever selected
         if (bestMove.IsNull && legalMoves.Length > 0)
-        {
             bestMove = legalMoves[0];
-        }
 
-        if (!ConstantDepth) LogEval(board, currentDepth, false);
+        LogEval(board, currentDepth, false); // Always log at the end, even in ConstantDepth mode
         return bestMove;
     }
 
@@ -265,21 +258,25 @@ public class EvilBot : IChessBot
 
     private void LogEval(Board board, int depth, bool isForcedMove)
     {
-        if (currentTimer != null && currentTimer.MillisecondsElapsedThisTurn > absoluteTimeLimit && !isForcedMove && depth <= 1) return;
-        if (currentTimer != null && currentTimer.MillisecondsRemaining <= 0 && !isForcedMove) return;
-
-        if (isForcedMove)
-        {
-            Console.WriteLine($"\n{GetType().Name}: FORCED MOVE!");
-        }
-        else
+        // Simplified condition to ensure logging in ConstantDepth mode
+        if (!isForcedMove && currentTimer != null && (ConstantDepth || (currentTimer.MillisecondsElapsedThisTurn <= absoluteTimeLimit && currentTimer.MillisecondsRemaining > 0)))
         {
             Console.WriteLine();
-            DebugLog($"Depth: {depth}"); // Keep: Log completed depth
+
             string mateInfo = GetMateInMoves(bestScore) ?? "No mate found";
+            string timeDisplay = currentTimer.MillisecondsElapsedThisTurn <= 9999 ? $"{currentTimer.MillisecondsElapsedThisTurn}ms" : $"{(currentTimer.MillisecondsElapsedThisTurn / 1000.0):F1}s";
+            string npsDisplay = currentTimer.MillisecondsElapsedThisTurn > 0 ? $"{((negamaxPositions + qsearchPositions) / (currentTimer.MillisecondsElapsedThisTurn / 1000.0) / 1000):F0}knps" : "0knps";
+
+            DebugLog($"Depth: {depth}"); // Keep: Log completed depth
             DebugLog(mateInfo);
             DebugLog($"Eval: {bestScore * (board.IsWhiteToMove ? 1 : -1)}"); // Eval from white's perspective
             DebugLog($"Nodes: {negamaxPositions + qsearchPositions:N0}");
+            DebugLog($"Time: {timeDisplay}");
+            DebugLog($"NPS: {npsDisplay}");
+        }
+        else if (isForcedMove)
+        {
+            Console.WriteLine($"\n{GetType().Name}: FORCED MOVE!");
         }
     }
 
@@ -313,31 +310,19 @@ public class EvilBot : IChessBot
             else if (previousBestMove.HasValue && move == previousBestMove.Value)
                 score += PREVIOUS_BEST_MOVE_BONUS;
 
+            // MVV-LVA scoring for captures
             if (move.IsCapture)
             {
-                Piece capturedPiece = board.GetPiece(move.TargetSquare);
-                int capturedValue = 0; // Initialize
-
-                if (move.IsEnPassant) // Handle En Passant explicitly
-                {
-                    capturedValue = PieceValues[(int)PieceType.Pawn - 1];
-                }
-                else if (capturedPiece.PieceType != PieceType.None)
-                {
-                    capturedValue = PieceValues[(int)capturedPiece.PieceType - 1];
-                }
-                // Removed redundant else { capturedValue = 0; }
-
+                int capturedValue = move.IsEnPassant ? PieceValues[(int)PieceType.Pawn - 1] : PieceValues[(int)board.GetPiece(move.TargetSquare).PieceType - 1];
                 int attackerValue = PieceValues[(int)board.GetPiece(move.StartSquare).PieceType - 1];
-                score += CAPTURE_BASE_BONUS + capturedValue * MVV_LVA_MULTIPLIER - attackerValue; // MVV-LVA
+                score += CAPTURE_BASE_BONUS + capturedValue * MVV_LVA_MULTIPLIER - attackerValue;
             }
-            else // Non-captures use Killer and History heuristics
+            else
             {
+                // Killer and history heuristics for non-captures
                 if (IsKillerMove(move, ply))
                     score += KILLER_MOVE_BONUS;
-
-                int historyScore = historyMoves[move.StartSquare.Index, move.TargetSquare.Index];
-                score += Math.Min(historyScore, HISTORY_MAX_BONUS);
+                score += Math.Min(historyMoves[move.StartSquare.Index, move.TargetSquare.Index], HISTORY_MAX_BONUS);
             }
 
             // Promotion bonus
@@ -355,9 +340,7 @@ public class EvilBot : IChessBot
     {
         // Check if ply is within the bounds of the killer move array
         if (ply < 0 || ply >= MAX_KILLER_PLY)
-        {
             return false; // Ply is out of supported range
-        }
         // Check if move matches either killer slot for the current ply
         return move == killerMoves[ply, 0] || move == killerMoves[ply, 1];
     }
@@ -366,9 +349,7 @@ public class EvilBot : IChessBot
     {
         // Only update for quiet moves and within supported ply range
         if (move.IsCapture || move.IsPromotion || ply < 0 || ply >= MAX_KILLER_PLY)
-        {
             return;
-        }
 
         // Shift killers if new move is different from the first killer
         if (move != killerMoves[ply, 0])
@@ -414,12 +395,12 @@ public class EvilBot : IChessBot
         beta = Math.Min(beta, mateScore);
         if (alpha >= beta) return alpha;
 
-        // Transposition Table Lookup
+        // --- Transposition Table Lookup ---
         ulong key = board.ZobristKey;
         int index = GetTTIndex(key);
         TTEntry ttEntry = tt[index];
         bool ttHit = ttEntry.Key == key;
-        Move ttMove = Move.NullMove;
+        Move ttMove = ttHit ? ttEntry.BestMove : Move.NullMove;
 
         if (ttHit && ttEntry.Depth >= depth)
         {
@@ -428,57 +409,42 @@ public class EvilBot : IChessBot
             if (ttEntry.Flag == ALPHA && ttScore <= alpha) return alpha;
             if (ttEntry.Flag == BETA && ttScore >= beta) return beta;
         }
-        if (ttHit) ttMove = ttEntry.BestMove;
 
-        // Base Case: Quiescence Search
+        // --- Base Case: Quiescence Search ---
         if (depth <= 0)
-        {
             return Quiescence(board, alpha, beta, ply, 0);
-        }
 
         Move[] moves = board.GetLegalMoves();
-
-        // Checkmate / Stalemate
         if (moves.Length == 0)
-        {
             return board.IsInCheck() ? -InfiniteScore + realPly * 50 : 0;
-        }
 
-        // Static Evaluation for Pruning (calculated lazily)
+        // --- Static Evaluation for Pruning ---
         int standPat = 0;
         bool inCheck = board.IsInCheck();
-        bool needEvalForPruning = !inCheck; // Simpler: eval always needed for NMP/Futility/Razoring if not in check
+        bool needEvalForPruning = !inCheck;
         if (needEvalForPruning) standPat = Evaluate(board);
 
+        // --- Null Move Pruning ---
         if (!inCheck && depth >= 3 && ply > 0 && !IsEndgame(board) && Math.Abs(standPat) < CHECKMATE_SCORE_THRESHOLD)
         {
             board.ForceSkipTurn();
-            int reduction = (depth > 6) ? 3 : 2;
+            int reduction = depth > 6 ? 3 : 2;
             int nullScore = -Negamax(board, depth - reduction - 1, -beta, -beta + 1, ply + 1, realPly + 1);
             board.UndoSkipTurn();
-
             if (timeIsUp) return 0;
             if (nullScore >= beta) return beta;
         }
 
-        // Razoring
+        // --- Razoring ---
         if (depth == 1 && !inCheck && standPat + 200 < alpha)
-        {
             return Quiescence(board, alpha, beta, ply, 0); // Fall back to QSearch
-        }
 
-        // Futility Pruning
+        // --- Futility Pruning ---
         bool inMateZone = Math.Abs(standPat) > CHECKMATE_SCORE_THRESHOLD;
-        if (depth <= 2 && !inCheck && !inMateZone)
-        {
-            int futilityMargin = 150 * depth;
-            if (standPat + futilityMargin <= alpha)
-            {
-                return Quiescence(board, alpha, beta, ply, 0); // Fall back to QSearch
-            }
-        }
+        if (depth <= 2 && !inCheck && !inMateZone && standPat + 150 * depth <= alpha)
+            return Quiescence(board, alpha, beta, ply, 0); // Fall back to QSearch
 
-        moves = OrderMoves(moves, board, ply, ttMove); // Order moves using heuristics
+        moves = OrderMoves(moves, board, ply, ttMove);
         int originalAlpha = alpha;
         Move bestMove = Move.NullMove;
         int localBestScore = -InfiniteScore;
@@ -490,10 +456,8 @@ public class EvilBot : IChessBot
             bool givesCheck = board.IsInCheck();
 
             int newDepth = depth - 1;
-            // Check Extension
             if (givesCheck && newDepth < MaxSafetyDepth - 1) newDepth = Math.Min(MaxSafetyDepth - 1, newDepth + 1); // Corrected MaxSafetyDepth
 
-            // Late Move Reductions (LMR)
             int score;
             bool isQuiet = !move.IsCapture && !move.IsPromotion;
             bool useLMR = depth > 2 && i >= 2 && isQuiet && !givesCheck && !inMateZone;
@@ -501,28 +465,20 @@ public class EvilBot : IChessBot
             if (useLMR)
             {
                 int reduction = (int)(0.75 + Math.Log(depth) * Math.Log(i + 1) / 2.0);
-                // Reduce reduction slightly for moves with good history scores
                 if (historyMoves[move.StartSquare.Index, move.TargetSquare.Index] > HISTORY_SCORE_CAP / 4)
                     reduction = Math.Max(reduction - 1, 0);
                 int reducedDepth = Math.Max(newDepth - reduction, 1);
 
                 score = -Negamax(board, reducedDepth, -alpha - 1, -alpha, ply + 1, realPly + 1); // Null window search
-
-                // Re-search if LMR potentially found a better move
                 if (score > alpha && score < beta && !timeIsUp)
-                {
                     score = -Negamax(board, newDepth, -beta, -alpha, ply + 1, realPly + 1); // Full window re-search
-                }
             }
-            else // Full Depth Search (No LMR or not applicable)
-            {
-                score = -Negamax(board, newDepth, -beta, -alpha, ply + 1, realPly + 1);
-            }
-            board.UndoMove(move);
+            else
+                score = -Negamax(board, newDepth, -beta, -alpha, ply + 1, realPly + 1); // Full Depth Search (No LMR or not applicable)
 
+            board.UndoMove(move);
             if (timeIsUp) return 0; // Check time after recursive call
 
-            // Update Best Score and Alpha
             if (score > localBestScore)
             {
                 localBestScore = score;
@@ -554,7 +510,6 @@ public class EvilBot : IChessBot
         if (timeIsUp) return 0;
 
         qsearchPositions++;
-
         int standPat = Evaluate(board);
         if (standPat >= beta) return beta;
         if (standPat > alpha) alpha = standPat;
@@ -569,7 +524,6 @@ public class EvilBot : IChessBot
             board.UndoMove(move);
 
             if (timeIsUp) return 0;
-
             if (score >= beta) return beta;
             if (score > alpha) alpha = score;
         }
@@ -699,9 +653,7 @@ public class EvilBot : IChessBot
     private short AdjustMateScoreForStorage(int score, int currentPly, int rootPly)
     {
         if (Math.Abs(score) > CHECKMATE_SCORE_THRESHOLD)
-        {
             return (short)Math.Clamp(score, -InfiniteScore + 50, InfiniteScore - 50);
-        }
         return (short)score;
     }
 
