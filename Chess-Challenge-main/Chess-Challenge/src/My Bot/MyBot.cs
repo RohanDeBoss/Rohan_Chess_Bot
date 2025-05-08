@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v2.2.a testing
+// v2.2.a Tweaks, bishops = 305 + Safety margin = 10
 public class MyBot : IChessBot
 {
     // Time management flags
@@ -19,7 +19,7 @@ public class MyBot : IChessBot
     private const short MaxSafetyDepth = 99;
     private const int InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22; // Approx 4 million entries
-    private const int MAX_KILLER_PLY = 200; // Define max ply for killer moves array
+    private const int MAX_KILLER_PLY = 256; // Define max ply for killer moves array
 
     // Move Ordering Bonuses
     private const int TT_MOVE_BONUS = 10_000_000;
@@ -34,13 +34,13 @@ public class MyBot : IChessBot
     private const int INITIAL_ASPIRATION_WINDOW = 150;
     private const int MAX_ASPIRATION_DEPTH = 3;
     private const int CHECKMATE_SCORE_THRESHOLD = 25000; // Eval cutoff for mate scores
-    private const int SAFETY_MARGIN = 15; // Small time buffer in ms
+    private const int SAFETY_MARGIN = 10; // Small time buffer in ms
     private const int TIME_CHECK_NODES = 100; // How often to check the time
 
     // Static Fields
     private TTEntry[] tt = new TTEntry[TT_SIZE];
     private readonly ulong ttMask = TT_SIZE - 1;
-    private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 }; // P, N, B, R, Q, K
+    private static readonly int[] PieceValues = { 100, 300, 305, 500, 900, 0 }; // P, N, B, R, Q, K
 
     // Instance Fields
     private long negamaxPositions = 0;
@@ -441,7 +441,7 @@ public class MyBot : IChessBot
 
         // --- Futility Pruning ---
         bool inMateZone = Math.Abs(standPat) > CHECKMATE_SCORE_THRESHOLD;
-        if (depth <= 2 && !inCheck && !inMateZone && standPat + 150 * depth <= alpha)
+        if (depth <= 2 && !inCheck && !inMateZone && standPat + 150 * depth <= alpha) //Lower margin = More aggressive (old 150 better)
             return Quiescence(board, alpha, beta, ply, 0); // Fall back to QSearch
 
         moves = OrderMoves(moves, board, ply, ttMove);
