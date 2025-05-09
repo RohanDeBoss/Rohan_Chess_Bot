@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v2.2.a Tweaks, bishops = 305 + Safety margin = 10
+// v2.2 bishop bonus = 30 + Safety margin = 10
 public class MyBot : IChessBot
 {
     // Time management flags
@@ -40,7 +40,7 @@ public class MyBot : IChessBot
     // Static Fields
     private TTEntry[] tt = new TTEntry[TT_SIZE];
     private readonly ulong ttMask = TT_SIZE - 1;
-    private static readonly int[] PieceValues = { 100, 300, 305, 500, 900, 0 }; // P, N, B, R, Q, K
+    private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 }; // P, N, B, R, Q, K
 
     // Instance Fields
     private long negamaxPositions = 0;
@@ -575,7 +575,7 @@ public class MyBot : IChessBot
         }
 
         // Bishop Pair Bonus
-        const int BISHOP_PAIR_BONUS = 50;
+        const int BISHOP_PAIR_BONUS = 30;
         if (whiteBishopCount >= 2) score += BISHOP_PAIR_BONUS;
         if (blackBishopCount >= 2) score -= BISHOP_PAIR_BONUS;
 
@@ -665,14 +665,14 @@ public class MyBot : IChessBot
     // -- Piece Square Tables --
 
     private static readonly int[][] PawnTable = {
-        new[] {0,  0,  0,  0,  0,  0,  0,  0},
+        new[] {0,  0,  0,  0,  0,  0,  0,   0},
         new[] {50, 50, 50, 50, 50, 50, 50, 50},
         new[] {12, 10, 20, 30, 30, 20, 11, 10},
-        new[] {5,  5, 10, 25, 25, 10,  5,  5},
-        new[] {1,  3,  6, 21, 22,  0,  0,  0},
-        new[] {5, -1,-10,  1,  3,-10, -5,  5},
-        new[] {5, 10, 10,-20,-20, 10, 11,  5},
-        new[] {0,  0,  0,  0,  0,  0,  0,  0}
+        new[] {5,  5, 10, 25, 25, 10,  5,   5},
+        new[] {1,  3,  6, 21, 22,  0,  0,   0},
+        new[] {5, -1,-10,  1,  3, -10, -5,  5},
+        new[] {5, 10, 10,-20,-20, 10, 11,   5},
+        new[] {0,  0,  0,  0,  0,  0,  0,   0}
     };
 
     private static readonly int[][] KnightTable = {
@@ -712,8 +712,8 @@ public class MyBot : IChessBot
         new[] {-20,-10,-10, -5, -5,-10,-10,-20},
         new[] {-10,  0,  0,  0,  0,  0,  0,-10},
         new[] {-10,  0,  5,  5,  5,  5,  0,-10},
-        new[] {-5,  0,  5,  5,  5,  5,  0, -5},
-        new[] {0,  0,  5,  5,  5,  5,  0, -5},
+        new[] {-5,  0,  5,  5,  5,  5,  0,  -5},
+        new[] {0,   0,  5,  5,  5,  5,  0,  -5},
         new[] {-10,  5,  5,  5,  5,  5,  0,-10},
         new[] {-10,  0,  5,  0,  0,  0,  0,-10},
         new[] {-20,-10,-10, -5, -5,-10,-10,-20}
@@ -726,8 +726,8 @@ public class MyBot : IChessBot
         new[] {-30,-40,-40,-50,-50,-40,-40,-30},
         new[] {-20,-30,-30,-40,-40,-30,-30,-20},
         new[] {-10,-20,-20,-20,-20,-20,-20,-10},
-        new[] {20, 20,  0,  0,  0,  0, 20, 20},
-        new[] {20, 30, 10,  0,  0, 10, 30, 20}
+        new[] {20, 20,  0,  0,  0,  0, 20,  20},
+        new[] {20, 30, 10,  0,  0, 10, 30,  20}
     };
 
     private static readonly int[][] KingEndGame = {
