@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v2.1 Code refractor + Cleanup + Debugging fixes & Customization
+// v2.2 bishop bonus = 30 + Safety margin = 10
 public class EvilBot : IChessBot
 {
     // Time management flags
@@ -19,7 +19,7 @@ public class EvilBot : IChessBot
     private const short MaxSafetyDepth = 99;
     private const int InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22; // Approx 4 million entries
-    private const int MAX_KILLER_PLY = 200; // Define max ply for killer moves array
+    private const int MAX_KILLER_PLY = 256; // Define max ply for killer moves array
 
     // Move Ordering Bonuses
     private const int TT_MOVE_BONUS = 10_000_000;
@@ -34,7 +34,7 @@ public class EvilBot : IChessBot
     private const int INITIAL_ASPIRATION_WINDOW = 150;
     private const int MAX_ASPIRATION_DEPTH = 3;
     private const int CHECKMATE_SCORE_THRESHOLD = 25000; // Eval cutoff for mate scores
-    private const int SAFETY_MARGIN = 15; // Small time buffer in ms
+    private const int SAFETY_MARGIN = 10; // Small time buffer in ms
     private const int TIME_CHECK_NODES = 100; // How often to check the time
 
     // Static Fields
@@ -441,7 +441,7 @@ public class EvilBot : IChessBot
 
         // --- Futility Pruning ---
         bool inMateZone = Math.Abs(standPat) > CHECKMATE_SCORE_THRESHOLD;
-        if (depth <= 2 && !inCheck && !inMateZone && standPat + 150 * depth <= alpha)
+        if (depth <= 2 && !inCheck && !inMateZone && standPat + 150 * depth <= alpha) //Lower margin = More aggressive (old 150 better)
             return Quiescence(board, alpha, beta, ply, 0); // Fall back to QSearch
 
         moves = OrderMoves(moves, board, ply, ttMove);
@@ -575,7 +575,7 @@ public class EvilBot : IChessBot
         }
 
         // Bishop Pair Bonus
-        const int BISHOP_PAIR_BONUS = 50;
+        const int BISHOP_PAIR_BONUS = 30;
         if (whiteBishopCount >= 2) score += BISHOP_PAIR_BONUS;
         if (blackBishopCount >= 2) score -= BISHOP_PAIR_BONUS;
 
@@ -665,14 +665,14 @@ public class EvilBot : IChessBot
     // -- Piece Square Tables --
 
     private static readonly int[][] PawnTable = {
-        new[] {0,  0,  0,  0,  0,  0,  0,  0},
+        new[] {0,  0,  0,  0,  0,  0,  0,   0},
         new[] {50, 50, 50, 50, 50, 50, 50, 50},
         new[] {12, 10, 20, 30, 30, 20, 11, 10},
-        new[] {5,  5, 10, 25, 25, 10,  5,  5},
-        new[] {1,  3,  6, 21, 22,  0,  0,  0},
-        new[] {5, -1,-10,  1,  3,-10, -5,  5},
-        new[] {5, 10, 10,-20,-20, 10, 11,  5},
-        new[] {0,  0,  0,  0,  0,  0,  0,  0}
+        new[] {5,  5, 10, 25, 25, 10,  5,   5},
+        new[] {1,  3,  6, 21, 22,  0,  0,   0},
+        new[] {5, -1,-10,  1,  3, -10, -5,  5},
+        new[] {5, 10, 10,-20,-20, 10, 11,   5},
+        new[] {0,  0,  0,  0,  0,  0,  0,   0}
     };
 
     private static readonly int[][] KnightTable = {
@@ -712,8 +712,8 @@ public class EvilBot : IChessBot
         new[] {-20,-10,-10, -5, -5,-10,-10,-20},
         new[] {-10,  0,  0,  0,  0,  0,  0,-10},
         new[] {-10,  0,  5,  5,  5,  5,  0,-10},
-        new[] {-5,  0,  5,  5,  5,  5,  0, -5},
-        new[] {0,  0,  5,  5,  5,  5,  0, -5},
+        new[] {-5,  0,  5,  5,  5,  5,  0,  -5},
+        new[] {0,   0,  5,  5,  5,  5,  0,  -5},
         new[] {-10,  5,  5,  5,  5,  5,  0,-10},
         new[] {-10,  0,  5,  0,  0,  0,  0,-10},
         new[] {-20,-10,-10, -5, -5,-10,-10,-20}
@@ -726,8 +726,8 @@ public class EvilBot : IChessBot
         new[] {-30,-40,-40,-50,-50,-40,-40,-30},
         new[] {-20,-30,-30,-40,-40,-30,-30,-20},
         new[] {-10,-20,-20,-20,-20,-20,-20,-10},
-        new[] {20, 20,  0,  0,  0,  0, 20, 20},
-        new[] {20, 30, 10,  0,  0, 10, 30, 20}
+        new[] {20, 20,  0,  0,  0,  0, 20,  20},
+        new[] {20, 30, 10,  0,  0, 10, 30,  20}
     };
 
     private static readonly int[][] KingEndGame = {

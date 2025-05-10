@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v2.3.c remove qsearch time quit
+// v2.2 bishop bonus = 30 + Safety margin = 10
 public class MyBot : IChessBot
 {
     // Time management flags
@@ -11,7 +11,7 @@ public class MyBot : IChessBot
     private static readonly short MaxDepth = 11; // Used when ConstantDepth is true
 
     private static readonly bool UseFixedTimePerMove = false; // Flag to enable fixed time per move (If constantDepth is false, otherwise ignored)
-    private static readonly int FixedTimePerMoveMs = 1000;   // Fixed time if flag is true (min 50ms)
+    private static readonly int FixedTimePerMoveMs = 200;   // Fixed time if flag is true (min 50ms)
 
     private static readonly bool PerDepthDebugging = false; // Flag to enable per-depth debugging
 
@@ -32,10 +32,10 @@ public class MyBot : IChessBot
 
     // Time Management
     private const int INITIAL_ASPIRATION_WINDOW = 150;
-    private const int MAX_ASPIRATION_DEPTH = 4;
+    private const int MAX_ASPIRATION_DEPTH = 3;
     private const int CHECKMATE_SCORE_THRESHOLD = 25000; // Eval cutoff for mate scores
     private const int SAFETY_MARGIN = 10; // Small time buffer in ms
-    private const int TIME_CHECK_NODES = 128; // How often to check the time
+    private const int TIME_CHECK_NODES = 100; // How often to check the time
 
     // Static Fields
     private TTEntry[] tt = new TTEntry[TT_SIZE];
@@ -83,7 +83,7 @@ public class MyBot : IChessBot
             return Math.Max(1, Math.Min(FixedTimePerMoveMs, timer.MillisecondsRemaining - SAFETY_MARGIN));
 
         short timeFraction = Math.Max(GetTimeSpentFraction(timer), (short)1);
-        int allocated = (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 2);
+        int allocated = (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 3);
         allocated = Math.Max(10, allocated - SAFETY_MARGIN);
         allocated = Math.Min(allocated, timer.MillisecondsRemaining - SAFETY_MARGIN);
         return Math.Max(1, allocated);
@@ -506,6 +506,9 @@ public class MyBot : IChessBot
 
     private int Quiescence(Board board, int alpha, int beta, int ply, int qDepth)
     {
+        CheckTime();
+        if (timeIsUp) return 0;
+
         qsearchPositions++;
         int standPat = Evaluate(board);
         if (standPat >= beta) return beta;
