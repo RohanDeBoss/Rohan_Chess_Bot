@@ -58,7 +58,7 @@ public class MyBot : IChessBot
     private void CheckTime()
     {
         if (ConstantDepth) return; // Skip time check when ConstantDepth is true
-        
+
         if ((negamaxPositions + qsearchPositions) % TIME_CHECK_NODES == 0) // Check time limit based on Constant TIME_CHECK_NODES
         {
             if (currentTimer.MillisecondsElapsedThisTurn >= absoluteTimeLimit)
