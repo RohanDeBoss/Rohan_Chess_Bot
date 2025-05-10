@@ -247,8 +247,7 @@ public class EvilBot : IChessBot
         if (bestMove.IsNull && legalMoves.Length > 0)
             bestMove = legalMoves[0];
 
-        LogEval(board, currentDepth, false); // Always log at the end, even in ConstantDepth mode
-        return bestMove;
+        return LogEval(board, currentDepth, false, bestMove);
     }
 
     private void DebugLog(string message)
@@ -256,28 +255,26 @@ public class EvilBot : IChessBot
         Console.WriteLine($"{GetType().Name} {message}");
     }
 
-    private void LogEval(Board board, int depth, bool isForcedMove)
+    private Move LogEval(Board board, int depth, bool isForcedMove, Move moveForThisTurn)
     {
-        // Simplified condition to ensure logging in ConstantDepth mode
-        if (!isForcedMove && currentTimer != null && (ConstantDepth || (currentTimer.MillisecondsElapsedThisTurn <= absoluteTimeLimit && currentTimer.MillisecondsRemaining > 0)))
+        if (!isForcedMove && currentTimer != null)
         {
             Console.WriteLine();
 
-            string mateInfo = GetMateInMoves(bestScore) ?? "No mate found";
-            string timeDisplay = currentTimer.MillisecondsElapsedThisTurn <= 9999 ? $"{currentTimer.MillisecondsElapsedThisTurn}ms" : $"{(currentTimer.MillisecondsElapsedThisTurn / 1000.0):F1}s";
+            string mateInfo = GetMateInMoves(this.bestScore) ?? "No mate found";
             string npsDisplay = currentTimer.MillisecondsElapsedThisTurn > 0 ? $"{((negamaxPositions + qsearchPositions) / (currentTimer.MillisecondsElapsedThisTurn / 1000.0) / 1000):F0}knps" : "0knps";
 
-            DebugLog($"Depth: {depth}"); // Keep: Log completed depth
+            DebugLog($"Depth: {this.currentDepth}");
             DebugLog(mateInfo);
-            DebugLog($"Eval: {bestScore * (board.IsWhiteToMove ? 1 : -1)}"); // Eval from white's perspective
+            DebugLog($"Eval: {this.bestScore * (board.IsWhiteToMove ? 1 : -1)}");
             DebugLog($"Nodes: {negamaxPositions + qsearchPositions:N0}");
-            DebugLog($"Time: {timeDisplay}");
             DebugLog($"NPS: {npsDisplay}");
         }
         else if (isForcedMove)
         {
             Console.WriteLine($"\n{GetType().Name}: FORCED MOVE!");
         }
+        return moveForThisTurn;
     }
 
     private string? GetMateInMoves(int score)
@@ -614,8 +611,7 @@ public class EvilBot : IChessBot
         // Handle single legal moves or immediate checkmates
         bestScore = -Evaluate(board);
         currentDepth = forcedDepth;
-        LogEval(board, forcedDepth, isForcedMove);
-        return move;
+        return LogEval(board, forcedDepth, isForcedMove, move);
     }
 
     private struct TTEntry
