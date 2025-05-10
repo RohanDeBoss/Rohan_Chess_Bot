@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v2.3 PST's optimisation + other small tweaks + fixed the debugging inconsistencies
+// v2.4.a SEE Integration
 public class MyBot : IChessBot
 {
     // Time management flags
@@ -300,35 +300,32 @@ public class MyBot : IChessBot
             Move move = moves[i];
             int score = 0;
 
-            // Prioritize TT move and previous best move
             if (!ttMove.IsNull && move == ttMove)
                 score += TT_MOVE_BONUS;
             else if (previousBestMove.HasValue && move == previousBestMove.Value)
                 score += PREVIOUS_BEST_MOVE_BONUS;
 
-            // MVV-LVA scoring for captures
             if (move.IsCapture)
             {
-                int capturedValue = move.IsEnPassant ? PieceValues[(int)PieceType.Pawn - 1] : PieceValues[(int)board.GetPiece(move.TargetSquare).PieceType - 1];
-                int attackerValue = PieceValues[(int)board.GetPiece(move.StartSquare).PieceType - 1];
-                score += CAPTURE_BASE_BONUS + capturedValue * MVV_LVA_MULTIPLIER - attackerValue;
+                // Use SEE for capture scoring
+                int seeScore = CalculateSEE(board, move);
+                score += CAPTURE_BASE_BONUS + seeScore;
             }
-            else
+            else // Quiet moves
             {
-                // Killer and history heuristics for non-captures
                 if (IsKillerMove(move, ply))
                     score += KILLER_MOVE_BONUS;
                 score += Math.Min(historyMoves[move.StartSquare.Index, move.TargetSquare.Index], HISTORY_MAX_BONUS);
             }
 
-            // Promotion bonus
-            if (move.IsPromotion)
-                score += PROMOTION_BASE_BONUS + PieceValues[(int)move.PromotionPieceType - 1];
+            if (move.IsPromotion) // Promotion bonus can stack with capture bonus
+                score += PROMOTION_BASE_BONUS + GetSeeValue(move.PromotionPieceType);
+
 
             scores[i] = score;
         }
 
-        Array.Sort(scores, moves, Comparer<int>.Create((a, b) => b.CompareTo(a))); // Sort descending
+        Array.Sort(scores, moves, Comparer<int>.Create((a, b) => b.CompareTo(a)));
         return moves;
     }
 
@@ -503,15 +500,25 @@ public class MyBot : IChessBot
     private int Quiescence(Board board, int alpha, int beta, int ply, int qDepth)
     {
         qsearchPositions++;
+        CheckTime(); // Added time check to Quiescence
+        if (timeIsUp) return 0;
+
         int standPat = Evaluate(board);
         if (standPat >= beta) return beta;
         if (standPat > alpha) alpha = standPat;
 
         Move[] captures = board.GetLegalMoves(true);
-        Move[] orderedMoves = OrderMoves(captures, board, ply);
+        Move[] orderedMoves = OrderMoves(captures, board, ply); // OrderMoves will use CalculateSEE
 
         foreach (Move move in orderedMoves)
         {
+            // SEE Pruning: If a capture is predicted to lose material, skip it.
+            int seeValue = CalculateSEE(board, move);
+            if (seeValue < 0)
+            {
+                continue;
+            }
+
             board.MakeMove(move);
             int score = -Quiescence(board, -beta, -alpha, ply + 1, qDepth + 1);
             board.UndoMove(move);
@@ -522,6 +529,103 @@ public class MyBot : IChessBot
         }
 
         return alpha;
+    }
+
+    private static readonly int[] SeePieceValues = { 100, 300, 310, 500, 900, 20000 }; // P, N, B, R, Q, K
+
+    private int GetSeeValue(PieceType pt)
+    {
+        if (pt == PieceType.None) return 0;
+        return SeePieceValues[(int)pt - 1];
+    }
+
+    // 2. Corrected GetLeastValuableAttacker
+    private (PieceType type, Square fromSquare) GetLeastValuableAttacker(Board board, Square targetSquare, bool attackerIsWhite, ulong occupiedHypothetical)
+    {
+        for (int pieceTypeId = 1; pieceTypeId <= 6; pieceTypeId++) // Iterate Pawn to King
+        {
+            PieceType currentPieceTypeToTest = (PieceType)pieceTypeId;
+            ulong potentialAttackersOfThisType = board.GetPieceBitboard(currentPieceTypeToTest, attackerIsWhite) & occupiedHypothetical;
+            if (potentialAttackersOfThisType == 0) continue;
+
+            ulong attackRaysToTarget;
+            switch (currentPieceTypeToTest)
+            {
+                case PieceType.Pawn: attackRaysToTarget = BitboardHelper.GetPawnAttacks(targetSquare, !attackerIsWhite); break;
+                case PieceType.Knight: attackRaysToTarget = BitboardHelper.GetKnightAttacks(targetSquare); break;
+                case PieceType.Bishop: attackRaysToTarget = BitboardHelper.GetSliderAttacks(PieceType.Bishop, targetSquare, occupiedHypothetical); break;
+                case PieceType.Rook: attackRaysToTarget = BitboardHelper.GetSliderAttacks(PieceType.Rook, targetSquare, occupiedHypothetical); break;
+                case PieceType.Queen: attackRaysToTarget = BitboardHelper.GetSliderAttacks(PieceType.Queen, targetSquare, occupiedHypothetical); break;
+                case PieceType.King: attackRaysToTarget = BitboardHelper.GetKingAttacks(targetSquare); break;
+                default: continue;
+            }
+
+            ulong actualAttackers = attackRaysToTarget & potentialAttackersOfThisType;
+            if (actualAttackers != 0)
+            {
+                return (currentPieceTypeToTest, new Square(BitOperations.TrailingZeroCount(actualAttackers)));
+            }
+        }
+        // Return PieceType.None as the primary indicator of failure.
+        // The square part can be default or an explicitly invalid index if desired,
+        // but the PieceType.None check is what matters.
+        return (PieceType.None, default(Square));
+    }
+
+    // 3. Corrected CalculateSEE
+    private int CalculateSEE(Board board, Move move)
+    {
+        if (!move.IsCapture) return 0;
+
+        Square targetSquare = move.TargetSquare;
+        PieceType initialAttackerPieceType = board.GetPiece(move.StartSquare).PieceType;
+        PieceType capturedPieceType = move.CapturePieceType;
+
+        int[] gain = new int[32];
+        int d = 0;
+
+        ulong occupiedHypothetical = board.AllPiecesBitboard;
+        bool currentSideToRecaptureIsWhite = !board.IsWhiteToMove;
+
+        gain[d++] = GetSeeValue(capturedPieceType);
+        // Correct way to get bitboard for a square: 1UL << square.Index
+        occupiedHypothetical ^= (1UL << move.StartSquare.Index);
+
+        PieceType pieceOnSquareForNextCapture = initialAttackerPieceType;
+
+        while (true)
+        {
+            (PieceType lvaType, Square lvaFromSquare) =
+                GetLeastValuableAttacker(board, targetSquare, currentSideToRecaptureIsWhite, occupiedHypothetical);
+
+            // Primary check for loop termination
+            if (lvaType == PieceType.None) break;
+
+            // Correct way to get bitboard for a square: 1UL << square.Index
+            occupiedHypothetical ^= (1UL << lvaFromSquare.Index);
+            gain[d++] = GetSeeValue(pieceOnSquareForNextCapture);
+
+            pieceOnSquareForNextCapture = lvaType;
+            currentSideToRecaptureIsWhite = !currentSideToRecaptureIsWhite;
+
+            if (d >= 32) break;
+        }
+
+        int seeScore = 0;
+        for (int k = d - 1; k >= 0; --k)
+        {
+            int netGainIfThisCaptureIsMade = gain[k] - seeScore;
+
+            if (k == 0)
+            {
+                seeScore = netGainIfThisCaptureIsMade;
+            }
+            else
+            {
+                seeScore = Math.Max(0, netGainIfThisCaptureIsMade);
+            }
+        }
+        return seeScore;
     }
 
     private int Evaluate(Board board)

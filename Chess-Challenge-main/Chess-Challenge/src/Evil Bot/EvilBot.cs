@@ -3,22 +3,22 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// v2.2 bishop bonus = 30 + Safety margin = 10
+// v2.4.a SEE Integration
 public class EvilBot : IChessBot
 {
     // Time management flags
     private static readonly bool ConstantDepth = false;
-    private static readonly short MaxDepth = 11; // Used when ConstantDepth is true
+    private static readonly short MaxDepth = 12; // Used when ConstantDepth is true
 
     private static readonly bool UseFixedTimePerMove = false; // Flag to enable fixed time per move (If constantDepth is false, otherwise ignored)
-    private static readonly int FixedTimePerMoveMs = 200;   // Fixed time if flag is true (min 50ms)
+    private static readonly int FixedTimePerMoveMs = 500;   // Fixed time in ms if flag is true (min 50ms)
 
     private static readonly bool PerDepthDebugging = false; // Flag to enable per-depth debugging
 
     // More constants
     private const short MaxSafetyDepth = 99;
     private const int InfiniteScore = 30000;
-    private const int TT_SIZE = 1 << 22; // Approx 4 million entries
+    private const int TT_SIZE = 1 << 22; // 4 million entries (approx 64mb ram)
     private const int MAX_KILLER_PLY = 256; // Define max ply for killer moves array
 
     // Move Ordering Bonuses
@@ -32,10 +32,10 @@ public class EvilBot : IChessBot
 
     // Time Management
     private const int INITIAL_ASPIRATION_WINDOW = 150;
-    private const int MAX_ASPIRATION_DEPTH = 3;
+    private const int MAX_ASPIRATION_DEPTH = 4;
     private const int CHECKMATE_SCORE_THRESHOLD = 25000; // Eval cutoff for mate scores
     private const int SAFETY_MARGIN = 10; // Small time buffer in ms
-    private const int TIME_CHECK_NODES = 100; // How often to check the time
+    private const int TIME_CHECK_NODES = 150; // How often to check the time in every (x) nodes
 
     // Static Fields
     private TTEntry[] tt = new TTEntry[TT_SIZE];
@@ -58,8 +58,8 @@ public class EvilBot : IChessBot
     private void CheckTime()
     {
         if (ConstantDepth) return; // Skip time check when ConstantDepth is true
-        // Check time limit frequently but not excessively based on node count
-        if ((negamaxPositions + qsearchPositions) % TIME_CHECK_NODES == 0)
+
+        if ((negamaxPositions + qsearchPositions) % TIME_CHECK_NODES == 0) // Check time limit based on Constant TIME_CHECK_NODES
         {
             if (currentTimer.MillisecondsElapsedThisTurn >= absoluteTimeLimit)
             {
@@ -71,6 +71,7 @@ public class EvilBot : IChessBot
     private short GetTimeSpentFraction(Timer timer)
     {
         int t = timer.MillisecondsRemaining;
+
         int result = 23 + 99900 / (t + 1675); // Formula for time allocation fraction
         return (short)Math.Max(26, Math.Min(65, result));
     }
@@ -83,7 +84,7 @@ public class EvilBot : IChessBot
             return Math.Max(1, Math.Min(FixedTimePerMoveMs, timer.MillisecondsRemaining - SAFETY_MARGIN));
 
         short timeFraction = Math.Max(GetTimeSpentFraction(timer), (short)1);
-        int allocated = (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 3);
+        int allocated = (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 2);
         allocated = Math.Max(10, allocated - SAFETY_MARGIN);
         allocated = Math.Min(allocated, timer.MillisecondsRemaining - SAFETY_MARGIN);
         return Math.Max(1, allocated);
@@ -136,9 +137,7 @@ public class EvilBot : IChessBot
                 DebugLog($"Starting search for timed move:");
         }
 
-        // --- Time Allocation ---
         absoluteTimeLimit = timer.MillisecondsElapsedThisTurn + AllocateTime(timer);
-        // --- End Time Allocation ---
 
         // --- Iterative Deepening Loop ---
         while (depth <= MaxSafetyDepth && (ConstantDepth ? depth <= MaxDepth : true))
@@ -198,7 +197,7 @@ public class EvilBot : IChessBot
             EndRootMoveLoop:;
                 if (timeIsUp) break;
 
-                // Handle Aspiration Window Re-search (Keep v2.1 logic)
+                // Handle Aspiration Window Re-search
                 if (aspirationFailed)
                 {
                     // If score <= original alpha (failed low)
@@ -301,35 +300,32 @@ public class EvilBot : IChessBot
             Move move = moves[i];
             int score = 0;
 
-            // Prioritize TT move and previous best move
             if (!ttMove.IsNull && move == ttMove)
                 score += TT_MOVE_BONUS;
             else if (previousBestMove.HasValue && move == previousBestMove.Value)
                 score += PREVIOUS_BEST_MOVE_BONUS;
 
-            // MVV-LVA scoring for captures
             if (move.IsCapture)
             {
-                int capturedValue = move.IsEnPassant ? PieceValues[(int)PieceType.Pawn - 1] : PieceValues[(int)board.GetPiece(move.TargetSquare).PieceType - 1];
-                int attackerValue = PieceValues[(int)board.GetPiece(move.StartSquare).PieceType - 1];
-                score += CAPTURE_BASE_BONUS + capturedValue * MVV_LVA_MULTIPLIER - attackerValue;
+                // Use SEE for capture scoring
+                int seeScore = CalculateSEE(board, move);
+                score += CAPTURE_BASE_BONUS + seeScore;
             }
-            else
+            else // Quiet moves
             {
-                // Killer and history heuristics for non-captures
                 if (IsKillerMove(move, ply))
                     score += KILLER_MOVE_BONUS;
                 score += Math.Min(historyMoves[move.StartSquare.Index, move.TargetSquare.Index], HISTORY_MAX_BONUS);
             }
 
-            // Promotion bonus
-            if (move.IsPromotion)
-                score += PROMOTION_BASE_BONUS + PieceValues[(int)move.PromotionPieceType - 1];
+            if (move.IsPromotion) // Promotion bonus can stack with capture bonus
+                score += PROMOTION_BASE_BONUS + GetSeeValue(move.PromotionPieceType);
+
 
             scores[i] = score;
         }
 
-        Array.Sort(scores, moves, Comparer<int>.Create((a, b) => b.CompareTo(a))); // Sort descending
+        Array.Sort(scores, moves, Comparer<int>.Create((a, b) => b.CompareTo(a)));
         return moves;
     }
 
@@ -503,19 +499,26 @@ public class EvilBot : IChessBot
 
     private int Quiescence(Board board, int alpha, int beta, int ply, int qDepth)
     {
-        CheckTime();
+        qsearchPositions++;
+        CheckTime(); // Added time check to Quiescence
         if (timeIsUp) return 0;
 
-        qsearchPositions++;
         int standPat = Evaluate(board);
         if (standPat >= beta) return beta;
         if (standPat > alpha) alpha = standPat;
 
         Move[] captures = board.GetLegalMoves(true);
-        Move[] orderedMoves = OrderMoves(captures, board, ply);
+        Move[] orderedMoves = OrderMoves(captures, board, ply); // OrderMoves will use CalculateSEE
 
         foreach (Move move in orderedMoves)
         {
+            // SEE Pruning: If a capture is predicted to lose material, skip it.
+            int seeValue = CalculateSEE(board, move);
+            if (seeValue < 0)
+            {
+                continue;
+            }
+
             board.MakeMove(move);
             int score = -Quiescence(board, -beta, -alpha, ply + 1, qDepth + 1);
             board.UndoMove(move);
@@ -528,6 +531,103 @@ public class EvilBot : IChessBot
         return alpha;
     }
 
+    private static readonly int[] SeePieceValues = { 100, 300, 310, 500, 900, 20000 }; // P, N, B, R, Q, K
+
+    private int GetSeeValue(PieceType pt)
+    {
+        if (pt == PieceType.None) return 0;
+        return SeePieceValues[(int)pt - 1];
+    }
+
+    // 2. Corrected GetLeastValuableAttacker
+    private (PieceType type, Square fromSquare) GetLeastValuableAttacker(Board board, Square targetSquare, bool attackerIsWhite, ulong occupiedHypothetical)
+    {
+        for (int pieceTypeId = 1; pieceTypeId <= 6; pieceTypeId++) // Iterate Pawn to King
+        {
+            PieceType currentPieceTypeToTest = (PieceType)pieceTypeId;
+            ulong potentialAttackersOfThisType = board.GetPieceBitboard(currentPieceTypeToTest, attackerIsWhite) & occupiedHypothetical;
+            if (potentialAttackersOfThisType == 0) continue;
+
+            ulong attackRaysToTarget;
+            switch (currentPieceTypeToTest)
+            {
+                case PieceType.Pawn: attackRaysToTarget = BitboardHelper.GetPawnAttacks(targetSquare, !attackerIsWhite); break;
+                case PieceType.Knight: attackRaysToTarget = BitboardHelper.GetKnightAttacks(targetSquare); break;
+                case PieceType.Bishop: attackRaysToTarget = BitboardHelper.GetSliderAttacks(PieceType.Bishop, targetSquare, occupiedHypothetical); break;
+                case PieceType.Rook: attackRaysToTarget = BitboardHelper.GetSliderAttacks(PieceType.Rook, targetSquare, occupiedHypothetical); break;
+                case PieceType.Queen: attackRaysToTarget = BitboardHelper.GetSliderAttacks(PieceType.Queen, targetSquare, occupiedHypothetical); break;
+                case PieceType.King: attackRaysToTarget = BitboardHelper.GetKingAttacks(targetSquare); break;
+                default: continue;
+            }
+
+            ulong actualAttackers = attackRaysToTarget & potentialAttackersOfThisType;
+            if (actualAttackers != 0)
+            {
+                return (currentPieceTypeToTest, new Square(BitOperations.TrailingZeroCount(actualAttackers)));
+            }
+        }
+        // Return PieceType.None as the primary indicator of failure.
+        // The square part can be default or an explicitly invalid index if desired,
+        // but the PieceType.None check is what matters.
+        return (PieceType.None, default(Square));
+    }
+
+    // 3. Corrected CalculateSEE
+    private int CalculateSEE(Board board, Move move)
+    {
+        if (!move.IsCapture) return 0;
+
+        Square targetSquare = move.TargetSquare;
+        PieceType initialAttackerPieceType = board.GetPiece(move.StartSquare).PieceType;
+        PieceType capturedPieceType = move.CapturePieceType;
+
+        int[] gain = new int[32];
+        int d = 0;
+
+        ulong occupiedHypothetical = board.AllPiecesBitboard;
+        bool currentSideToRecaptureIsWhite = !board.IsWhiteToMove;
+
+        gain[d++] = GetSeeValue(capturedPieceType);
+        // Correct way to get bitboard for a square: 1UL << square.Index
+        occupiedHypothetical ^= (1UL << move.StartSquare.Index);
+
+        PieceType pieceOnSquareForNextCapture = initialAttackerPieceType;
+
+        while (true)
+        {
+            (PieceType lvaType, Square lvaFromSquare) =
+                GetLeastValuableAttacker(board, targetSquare, currentSideToRecaptureIsWhite, occupiedHypothetical);
+
+            // Primary check for loop termination
+            if (lvaType == PieceType.None) break;
+
+            // Correct way to get bitboard for a square: 1UL << square.Index
+            occupiedHypothetical ^= (1UL << lvaFromSquare.Index);
+            gain[d++] = GetSeeValue(pieceOnSquareForNextCapture);
+
+            pieceOnSquareForNextCapture = lvaType;
+            currentSideToRecaptureIsWhite = !currentSideToRecaptureIsWhite;
+
+            if (d >= 32) break;
+        }
+
+        int seeScore = 0;
+        for (int k = d - 1; k >= 0; --k)
+        {
+            int netGainIfThisCaptureIsMade = gain[k] - seeScore;
+
+            if (k == 0)
+            {
+                seeScore = netGainIfThisCaptureIsMade;
+            }
+            else
+            {
+                seeScore = Math.Max(0, netGainIfThisCaptureIsMade);
+            }
+        }
+        return seeScore;
+    }
+
     private int Evaluate(Board board)
     {
         if (board.IsDraw()) return 0;
@@ -536,19 +636,14 @@ public class EvilBot : IChessBot
         Square blackKingSquare = board.GetKingSquare(false);
         bool isEndgame = IsEndgame(board);
 
-        int[][][] adjustmentTables = { PawnTable, KnightTable, BishopTable, RookTable, QueenTable, isEndgame ? KingEndGame : KingMiddleGame };
-
         int score = 0;
         int whiteBishopCount = 0;
         int blackBishopCount = 0;
 
         foreach (PieceList list in board.GetAllPieceLists())
         {
-            int pieceTypeIndex = (int)list.TypeOfPieceInList - 1;
-            if (pieceTypeIndex < 0 || pieceTypeIndex > 5) continue;
-
+            int pieceTypeIndex = (int)list.TypeOfPieceInList - 1; // 0 for Pawn, ..., 5 for King
             int baseVal = PieceValues[pieceTypeIndex];
-            int[][] table = adjustmentTables[pieceTypeIndex];
             int pieceSign = list.IsWhitePieceList ? 1 : -1;
 
             if (list.TypeOfPieceInList == PieceType.Bishop)
@@ -556,17 +651,30 @@ public class EvilBot : IChessBot
                 if (list.IsWhitePieceList) whiteBishopCount += list.Count; else blackBishopCount += list.Count;
             }
 
+            int[] pstForPieceType;
+            if (list.TypeOfPieceInList == PieceType.King) // Special handling for King PST (Midgame vs Endgame)
+            {
+                pstForPieceType = isEndgame ? KingEndGamePST : KingMiddleGamePST;
+            }
+            else // Other pieces
+            {
+                pstForPieceType = PiecePSTs[pieceTypeIndex];
+            }
+
+            int xorMask = list.IsWhitePieceList ? 0 : 56; // 0 for White (no change), 56 for Black (flip rank)
+
             foreach (Piece p in list)
             {
-                int rank = p.IsWhite ? 7 - p.Square.Rank : p.Square.Rank; // Rank from perspective of color
-                int file = p.Square.File;
-                score += pieceSign * (baseVal + table[rank][file]); // Material + PST
+                score += pieceSign * (baseVal + pstForPieceType[p.Square.Index ^ xorMask]); // Material + PST
 
                 // Endgame Pawn Advancement Bonus
                 if (isEndgame && p.PieceType == PieceType.Pawn)
                 {
-                    int advancementBonus = p.IsWhite ? rank : (7 - rank);
-                    score += pieceSign * advancementBonus * 5;
+                    // This logic correctly replicates the original flawed pawn bonus.
+                    // 'perspective_rank_val' is rank from piece's perspective (0=8th rank, 7=1st rank)
+                    int perspective_rank_val = p.IsWhite ? (7 - p.Square.Rank) : p.Square.Rank;
+                    int advancement_bonus_val = p.IsWhite ? perspective_rank_val : (7 - perspective_rank_val);
+                    score += pieceSign * advancement_bonus_val * 5;
                 }
             }
         }
@@ -658,82 +766,81 @@ public class EvilBot : IChessBot
         return score;
     }
 
-    // -- Piece Square Tables --
+    // -- Piece Square Tables (Perspective of White, Black's are flipped via XOR 56) --
 
-    private static readonly int[][] PawnTable = {
-        new[] {0,  0,  0,  0,  0,  0,  0,   0},
-        new[] {50, 50, 50, 50, 50, 50, 50, 50},
-        new[] {12, 10, 20, 30, 30, 20, 11, 10},
-        new[] {5,  5, 10, 25, 25, 10,  5,   5},
-        new[] {1,  3,  6, 21, 22,  0,  0,   0},
-        new[] {5, -1,-10,  1,  3, -10, -5,  5},
-        new[] {5, 10, 10,-20,-20, 10, 11,   5},
-        new[] {0,  0,  0,  0,  0,  0,  0,   0}
+    private static readonly int[] PawnPST = {
+          0,   0,   0,   0,   0,   0,   0,   0, // Rank 1 (White's perspective)
+          5,  10,  10, -20, -20,  10,  11,   5, // Rank 2
+          5,  -1, -10,   1,   3, -10,   0,   5, // Rank 3
+          1,   3,   6,  21,  22,   0,   0,   0, // Rank 4
+          5,   5,  10,  25,  25,  10,   5,   5, // Rank 5
+         12,  10,  20,  30,  30,  20,  11,  10, // Rank 6
+         50,  50,  50,  50,  50,  50,  50,  50, // Rank 7
+          0,   0,   0,   0,   0,   0,   0,   0  // Rank 8
+    };
+    private static readonly int[] KnightPST = {
+        -50, -40, -30, -30, -30, -30, -40, -50,
+        -40, -20,   0,   5,   5,   0, -20, -40,
+        -30,   5,  10,  15,  15,  10,   5, -30,
+        -30,   0,  15,  20,  20,  15,   0, -30,
+        -30,   5,  15,  20,  20,  15,   5, -30,
+        -30,   0,  10,  15,  15,  10,   0, -30,
+        -40, -20,  -3,   0,   0,  -3, -20, -40,
+        -50, -40, -30, -30, -30, -30, -40, -50
+    };
+    private static readonly int[] BishopPST = {
+        -20, -10, -10, -10, -10, -10, -10, -20,
+        -10,   5,   0,   0,   0,   0,   5, -10,
+        -10,  10,  10,  10,  10,  10,  10, -10,
+        -10,   0,  10,  10,  10,  10,   0, -10,
+        -10,   5,   5,  10,  10,   5,   5, -10,
+        -10,   0,   5,  10,  10,   5,   0, -10,
+        -10,   0,   0,   0,   0,   0,   0, -10,
+        -20, -10, -10, -10, -10, -10, -10, -20
+    };
+    private static readonly int[] RookPST = {
+          0,   0,   0,   5,   5,   0,   0,  -4,
+         -5,   0,   0,   0,   0,   0,   0,  -5,
+         -5,   0,   0,   0,   0,   0,   0,  -5,
+         -5,   0,   0,   0,   0,   0,   0,  -5,
+         -5,   0,   0,   0,   0,   0,   0,  -5,
+         -5,   0,   0,   0,   0,   0,   0,  -5,
+          0,  10,  10,  10,  10,  10,  10,   5,
+          0,   0,   0,   0,   0,   0,   0,   0
+    };
+    private static readonly int[] QueenPST = {
+        -20, -10, -10,  -5,  -5, -10, -10, -20,
+        -10,   0,   5,   0,   0,   0,   0, -10,
+        -10,   5,   5,   5,   5,   5,   0, -10,
+          0,   0,   5,   5,   5,   5,   0,  -5,
+         -5,   0,   5,   5,   5,   5,   0,  -5,
+        -10,   0,   5,   5,   5,   5,   0, -10,
+        -10,   0,   0,   0,   0,   0,   0, -10,
+        -20, -10, -10,  -5,  -5, -10, -10, -20
+    };
+    private static readonly int[] KingMiddleGamePST = {
+         20,  30,  10,   0,   0,  10,  30,  20,
+         20,  20,   0,   0,   0,   0,  20,  20,
+        -10, -20, -20, -20, -20, -20, -20, -10,
+        -20, -30, -30, -40, -40, -30, -30, -20,
+        -30, -40, -40, -50, -50, -40, -40, -30,
+        -30, -40, -40, -50, -50, -40, -40, -30,
+        -30, -40, -40, -50, -50, -40, -40, -30,
+        -30, -40, -40, -50, -50, -40, -40, -30
+    };
+    private static readonly int[] KingEndGamePST = {
+        -30, -20, -20, -20, -20, -20, -20, -30,
+        -20, -15, -10,   0,   0, -10, -10, -20,
+        -20, -10,  15,  20,  15,  15, -10, -20,
+        -20, -10,  15,  18,  18,  15, -10, -20,
+        -20, -10,  15,  18,  18,  15, -10, -20,
+        -20, -10,  10,  15,  15,  15, -10, -20,
+        -20, -15, -10,  -5,  -5, -10, -15, -20,
+        -30, -25, -20, -15, -15, -20, -25, -30
     };
 
-    private static readonly int[][] KnightTable = {
-        new[] {-50,-40,-30,-30,-30,-30,-40,-50},
-        new[] {-40,-20,  0,  0,  0,  0,-20,-40},
-        new[] {-30,  0, 10, 15, 15, 10,  0,-30},
-        new[] {-30,  5, 15, 20, 20, 15,  5,-30},
-        new[] {-30,  0, 15, 20, 20, 15,  0,-30},
-        new[] {-30,  5, 10, 15, 15, 10,  5,-30},
-        new[] {-40,-20,  0,  5,  5,  0,-20,-40},
-        new[] {-50,-40,-30,-30,-30,-30,-40,-50}
-    };
-
-    private static readonly int[][] BishopTable = {
-        new[] {-20,-10,-10,-10,-10,-10,-10,-20},
-        new[] {-10,  0,  0,  0,  0,  0,  0,-10},
-        new[] {-10,  0,  5, 10, 10,  5,  0,-10},
-        new[] {-10,  5,  5, 10, 10,  5,  5,-10},
-        new[] {-10,  0, 10, 10, 10, 10,  0,-10},
-        new[] {-10, 10, 10, 10, 10, 10, 10,-10},
-        new[] {-10,  5,  0,  0,  0,  0,  5,-10},
-        new[] {-20,-10,-10,-10,-10,-10,-10,-20}
-    };
-
-    private static readonly int[][] RookTable = {
-        new[] {0,   0,  0,  0,  0,  0,  0,  0},
-        new[] {0,  10, 10, 10, 10, 10, 10,  5},
-        new[] {-5,  0,  0,  0,  0,  0,  0, -5},
-        new[] {-5,  0,  0,  0,  0,  0,  0, -5},
-        new[] {-5,  0,  0,  0,  0,  0,  0, -5},
-        new[] {-5,  0,  0,  0,  0,  0,  0, -5},
-        new[] {-5,  0,  0,  0,  0,  0,  0, -5},
-        new[] {0,  0,  0,  5,  5,  0,  0,  -4}
-    };
-
-    private static readonly int[][] QueenTable = {
-        new[] {-20,-10,-10, -5, -5,-10,-10,-20},
-        new[] {-10,  0,  0,  0,  0,  0,  0,-10},
-        new[] {-10,  0,  5,  5,  5,  5,  0,-10},
-        new[] {-5,  0,  5,  5,  5,  5,  0,  -5},
-        new[] {0,   0,  5,  5,  5,  5,  0,  -5},
-        new[] {-10,  5,  5,  5,  5,  5,  0,-10},
-        new[] {-10,  0,  5,  0,  0,  0,  0,-10},
-        new[] {-20,-10,-10, -5, -5,-10,-10,-20}
-    };
-
-    private static readonly int[][] KingMiddleGame = {
-        new[] {-30,-40,-40,-50,-50,-40,-40,-30},
-        new[] {-30,-40,-40,-50,-50,-40,-40,-30},
-        new[] {-30,-40,-40,-50,-50,-40,-40,-30},
-        new[] {-30,-40,-40,-50,-50,-40,-40,-30},
-        new[] {-20,-30,-30,-40,-40,-30,-30,-20},
-        new[] {-10,-20,-20,-20,-20,-20,-20,-10},
-        new[] {20, 20,  0,  0,  0,  0, 20,  20},
-        new[] {20, 30, 10,  0,  0, 10, 30,  20}
-    };
-
-    private static readonly int[][] KingEndGame = {
-        new[] {-30,-25,-20,-15,-15,-20,-25,-30},
-        new[] {-20,-15,-10,-5, -5, -10,-15,-20},
-        new[] {-20,-10, 10, 15, 15, 15,-10,-20},
-        new[] {-20,-10, 15, 18, 18, 15,-10,-20},
-        new[] {-20,-10, 15, 18, 18, 15,-10,-20},
-        new[] {-20,-10, 15, 20, 15, 15,-10,-20},
-        new[] {-20,-15,-10,  0,  0,-10,-10,-20},
-        new[] {-30,-20,-20,-20,-20,-20,-20,-30}
+    // Helper array to access the correct PST in Evaluate
+    private static readonly int[][] PiecePSTs = {
+        PawnPST, KnightPST, BishopPST, RookPST, QueenPST, KingMiddleGamePST // Default King to MidGame for this general array
     };
 }
