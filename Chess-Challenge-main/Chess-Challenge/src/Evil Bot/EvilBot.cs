@@ -2,8 +2,9 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using System.Buffers;
 
-// v2.4.a SEE Integration
+// v2.4.e Optimised SEE, with original comment style restored
 public class EvilBot : IChessBot
 {
     // Time management flags
@@ -35,7 +36,10 @@ public class EvilBot : IChessBot
     private const int MAX_ASPIRATION_DEPTH = 4;
     private const int CHECKMATE_SCORE_THRESHOLD = 25000; // Eval cutoff for mate scores
     private const int SAFETY_MARGIN = 10; // Small time buffer in ms
-    private const int TIME_CHECK_NODES = 150; // How often to check the time in every (x) nodes
+
+    private const int TIME_CHECK_NODES = 1024; // How often to check the time in every (x) nodes 
+                                               // (Note: value changed to power of 2 for optimization)
+    private const int TIME_CHECK_MASK = TIME_CHECK_NODES - 1;
 
     // Static Fields
     private TTEntry[] tt = new TTEntry[TT_SIZE];
@@ -55,11 +59,17 @@ public class EvilBot : IChessBot
     private volatile bool timeIsUp; // Global flag for time expiration
     private long absoluteTimeLimit; // Absolute time limit for the current move
 
+    private static readonly DescendingIntComparer _descendingIntComparer = new DescendingIntComparer();
+    private class DescendingIntComparer : IComparer<int>
+    {
+        public int Compare(int x, int y) => y.CompareTo(x);
+    }
+
     private void CheckTime()
     {
         if (ConstantDepth) return; // Skip time check when ConstantDepth is true
 
-        if ((negamaxPositions + qsearchPositions) % TIME_CHECK_NODES == 0) // Check time limit based on Constant TIME_CHECK_NODES
+        if (((negamaxPositions + qsearchPositions) & TIME_CHECK_MASK) == 0) // Check time limit based on Constant TIME_CHECK_NODES (using bitmask)
         {
             if (currentTimer.MillisecondsElapsedThisTurn >= absoluteTimeLimit)
             {
@@ -71,7 +81,6 @@ public class EvilBot : IChessBot
     private short GetTimeSpentFraction(Timer timer)
     {
         int t = timer.MillisecondsRemaining;
-
         int result = 23 + 99900 / (t + 1675); // Formula for time allocation fraction
         return (short)Math.Max(26, Math.Min(65, result));
     }
@@ -221,7 +230,7 @@ public class EvilBot : IChessBot
                         bestMoveThisIteration = currentBestMoveAspiration;
                 }
 
-            } while (aspirationFailed && !timeIsUp); // Repeat if aspiration failed and time permits
+            } while (aspirationFailed && !timeIsUp);
 
             if (timeIsUp) break;
 
@@ -229,12 +238,13 @@ public class EvilBot : IChessBot
             {
                 bestMove = bestMoveThisIteration;
                 previousBestMove = bestMove;
-                string timeDisplay = currentTimer.MillisecondsElapsedThisTurn <= 9999 ? $"{currentTimer.MillisecondsElapsedThisTurn}ms" : $"{(currentTimer.MillisecondsElapsedThisTurn / 1000.0):F1}s";
-                long totalNodes = negamaxPositions + qsearchPositions;
-                string nodesDisplay = totalNodes < 10000 ? $"{totalNodes}" : totalNodes < 10000000 ? $"{(totalNodes / 1000.0):F1}k" : $"{(totalNodes / 1000000.0):F1}m";
-
                 if (PerDepthDebugging)
-                    DebugLog($"Depth {depth}, Nodes {nodesDisplay}, Time {timeDisplay}");
+                {
+                    string timeDisplay = currentTimer.MillisecondsElapsedThisTurn <= 9999 ? $"{currentTimer.MillisecondsElapsedThisTurn}ms" : $"{(currentTimer.MillisecondsElapsedThisTurn / 1000.0):F1}s";
+                    long totalNodes = negamaxPositions + qsearchPositions;
+                    string nodesDisplay = totalNodes < 10000 ? $"{totalNodes}" : totalNodes < 10000000 ? $"{(totalNodes / 1000.0):F1}k" : $"{(totalNodes / 1000000.0):F1}m";
+                    DebugLog($"Depth {depth}, Score {previousBestScore}, BestMove {bestMove}, Nodes {nodesDisplay}, Time {timeDisplay}");
+                }
             }
             else
                 break; // If iteration failed to find a move (likely due to time out), use previous best
@@ -291,42 +301,48 @@ public class EvilBot : IChessBot
     {
         if (moves.Length <= 1) return moves;
 
-        int[] scores = new int[moves.Length];
-        TTEntry ttEntry = tt[GetTTIndex(board.ZobristKey)];
-        Move ttMove = (ttEntry.Key == board.ZobristKey) ? ttEntry.BestMove : Move.NullMove;
-
-        for (int i = 0; i < moves.Length; i++)
+        int[] scores = ArrayPool<int>.Shared.Rent(moves.Length);
+        try
         {
-            Move move = moves[i];
-            int score = 0;
+            TTEntry ttEntry = tt[GetTTIndex(board.ZobristKey)];
+            Move ttMove = (ttEntry.Key == board.ZobristKey) ? ttEntry.BestMove : Move.NullMove;
 
-            if (!ttMove.IsNull && move == ttMove)
-                score += TT_MOVE_BONUS;
-            else if (previousBestMove.HasValue && move == previousBestMove.Value)
-                score += PREVIOUS_BEST_MOVE_BONUS;
-
-            if (move.IsCapture)
+            for (int i = 0; i < moves.Length; i++)
             {
-                // Use SEE for capture scoring
-                int seeScore = CalculateSEE(board, move);
-                score += CAPTURE_BASE_BONUS + seeScore;
+                Move move = moves[i];
+                int score = 0;
+
+                if (!ttMove.IsNull && move == ttMove)
+                    score += TT_MOVE_BONUS;
+                else if (ply == 0 && previousBestMove.HasValue && move == previousBestMove.Value) // previousBestMove only at root
+                    score += PREVIOUS_BEST_MOVE_BONUS;
+
+                if (move.IsCapture)
+                {
+                    // Use SEE for capture scoring
+                    int seeScore = CalculateSEE(board, move);
+                    score += CAPTURE_BASE_BONUS + seeScore;
+                }
+                else // Quiet moves
+                {
+                    if (IsKillerMove(move, ply))
+                        score += KILLER_MOVE_BONUS;
+                    score += Math.Min(historyMoves[move.StartSquare.Index, move.TargetSquare.Index], HISTORY_MAX_BONUS);
+                }
+
+                if (move.IsPromotion) // Promotion bonus can stack with capture bonus
+                    score += PROMOTION_BASE_BONUS + GetSeeValue(move.PromotionPieceType);
+
+                scores[i] = score;
             }
-            else // Quiet moves
-            {
-                if (IsKillerMove(move, ply))
-                    score += KILLER_MOVE_BONUS;
-                score += Math.Min(historyMoves[move.StartSquare.Index, move.TargetSquare.Index], HISTORY_MAX_BONUS);
-            }
 
-            if (move.IsPromotion) // Promotion bonus can stack with capture bonus
-                score += PROMOTION_BASE_BONUS + GetSeeValue(move.PromotionPieceType);
-
-
-            scores[i] = score;
+            Array.Sort(scores, moves, 0, moves.Length, _descendingIntComparer);
+            return moves;
         }
-
-        Array.Sort(scores, moves, Comparer<int>.Create((a, b) => b.CompareTo(a)));
-        return moves;
+        finally
+        {
+            ArrayPool<int>.Shared.Return(scores);
+        }
     }
 
     private bool IsKillerMove(Move move, int ply)
@@ -362,7 +378,7 @@ public class EvilBot : IChessBot
         historyMoves[startIdx, targetIdx] = Math.Min(historyMoves[startIdx, targetIdx] + bonus, HISTORY_SCORE_CAP);
 
         // Periodically decay history scores
-        if ((negamaxPositions + qsearchPositions) % 1024 == 0)
+        if (((negamaxPositions + qsearchPositions) & TIME_CHECK_MASK) == 0)
             DecayHistory();
     }
 
@@ -449,7 +465,7 @@ public class EvilBot : IChessBot
             bool givesCheck = board.IsInCheck();
 
             int newDepth = depth - 1;
-            if (givesCheck && newDepth < MaxSafetyDepth - 1) newDepth = Math.Min(MaxSafetyDepth - 1, newDepth + 1); // Corrected MaxSafetyDepth
+            if (givesCheck && newDepth < MaxSafetyDepth - 1) newDepth = Math.Min(MaxSafetyDepth - 1, newDepth + 1); // Corrected MaxSafetyDepth (original comment)
 
             int score;
             bool isQuiet = !move.IsCapture && !move.IsPromotion;
@@ -513,7 +529,7 @@ public class EvilBot : IChessBot
         foreach (Move move in orderedMoves)
         {
             // SEE Pruning: If a capture is predicted to lose material, skip it.
-            int seeValue = CalculateSEE(board, move);
+            int seeValue = CalculateSEE(board, move); // Original code had CalculateSEE here, now it's also in OrderMoves
             if (seeValue < 0)
             {
                 continue;
@@ -527,7 +543,6 @@ public class EvilBot : IChessBot
             if (score >= beta) return beta;
             if (score > alpha) alpha = score;
         }
-
         return alpha;
     }
 
@@ -539,10 +554,9 @@ public class EvilBot : IChessBot
         return SeePieceValues[(int)pt - 1];
     }
 
-    // 2. Corrected GetLeastValuableAttacker
     private (PieceType type, Square fromSquare) GetLeastValuableAttacker(Board board, Square targetSquare, bool attackerIsWhite, ulong occupiedHypothetical)
     {
-        for (int pieceTypeId = 1; pieceTypeId <= 6; pieceTypeId++) // Iterate Pawn to King
+        for (int pieceTypeId = 1; pieceTypeId <= 6; pieceTypeId++)
         {
             PieceType currentPieceTypeToTest = (PieceType)pieceTypeId;
             ulong potentialAttackersOfThisType = board.GetPieceBitboard(currentPieceTypeToTest, attackerIsWhite) & occupiedHypothetical;
@@ -572,25 +586,22 @@ public class EvilBot : IChessBot
         return (PieceType.None, default(Square));
     }
 
-    // 3. Corrected CalculateSEE
     private int CalculateSEE(Board board, Move move)
     {
         if (!move.IsCapture) return 0;
 
         Square targetSquare = move.TargetSquare;
-        PieceType initialAttackerPieceType = board.GetPiece(move.StartSquare).PieceType;
+        PieceType initialAttackerPieceType = move.MovePieceType;
         PieceType capturedPieceType = move.CapturePieceType;
 
-        int[] gain = new int[32];
+        Span<int> gain = stackalloc int[32];
         int d = 0;
 
         ulong occupiedHypothetical = board.AllPiecesBitboard;
         bool currentSideToRecaptureIsWhite = !board.IsWhiteToMove;
 
         gain[d++] = GetSeeValue(capturedPieceType);
-        // Correct way to get bitboard for a square: 1UL << square.Index
         occupiedHypothetical ^= (1UL << move.StartSquare.Index);
-
         PieceType pieceOnSquareForNextCapture = initialAttackerPieceType;
 
         while (true)
@@ -598,16 +609,12 @@ public class EvilBot : IChessBot
             (PieceType lvaType, Square lvaFromSquare) =
                 GetLeastValuableAttacker(board, targetSquare, currentSideToRecaptureIsWhite, occupiedHypothetical);
 
-            // Primary check for loop termination
             if (lvaType == PieceType.None) break;
 
-            // Correct way to get bitboard for a square: 1UL << square.Index
             occupiedHypothetical ^= (1UL << lvaFromSquare.Index);
             gain[d++] = GetSeeValue(pieceOnSquareForNextCapture);
-
             pieceOnSquareForNextCapture = lvaType;
             currentSideToRecaptureIsWhite = !currentSideToRecaptureIsWhite;
-
             if (d >= 32) break;
         }
 
@@ -615,7 +622,6 @@ public class EvilBot : IChessBot
         for (int k = d - 1; k >= 0; --k)
         {
             int netGainIfThisCaptureIsMade = gain[k] - seeScore;
-
             if (k == 0)
             {
                 seeScore = netGainIfThisCaptureIsMade;
@@ -710,7 +716,6 @@ public class EvilBot : IChessBot
             lastBoardHash = currentBoardHash;
         }
         const int endgameTotalPieceThreshold = 11; // Endgame if 11 or fewer total pieces (including kings) remain
-
         return cachedPieceCount <= endgameTotalPieceThreshold;
     }
 
@@ -767,7 +772,6 @@ public class EvilBot : IChessBot
     }
 
     // -- Piece Square Tables (Perspective of White, Black's are flipped via XOR 56) --
-
     private static readonly int[] PawnPST = {
           0,   0,   0,   0,   0,   0,   0,   0, // Rank 1 (White's perspective)
           5,  10,  10, -20, -20,  10,  11,   5, // Rank 2
@@ -839,7 +843,6 @@ public class EvilBot : IChessBot
         -30, -25, -20, -15, -15, -20, -25, -30
     };
 
-    // Helper array to access the correct PST in Evaluate
     private static readonly int[][] PiecePSTs = {
         PawnPST, KnightPST, BishopPST, RookPST, QueenPST, KingMiddleGamePST // Default King to MidGame for this general array
     };
