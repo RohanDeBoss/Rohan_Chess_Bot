@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Buffers;
 
-// v2.4.e Optimised SEE, with original comment style restored
+// v2.4.c Optimised SEE, with original comment style restored
 public class EvilBot : IChessBot
 {
     // Time management flags
