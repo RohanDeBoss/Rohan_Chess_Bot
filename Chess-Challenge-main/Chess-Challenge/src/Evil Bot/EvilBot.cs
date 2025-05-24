@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Buffers;
 
-// v2.4.c Optimised SEE, with original comment style restored
+// v2.4 Implemented SEE optimisation and tweaked implementation
 public class EvilBot : IChessBot
 {
     // Time management flags
@@ -516,23 +516,23 @@ public class EvilBot : IChessBot
     private int Quiescence(Board board, int alpha, int beta, int ply, int qDepth)
     {
         qsearchPositions++;
-        CheckTime(); // Added time check to Quiescence
-        if (timeIsUp) return 0;
-
         int standPat = Evaluate(board);
         if (standPat >= beta) return beta;
         if (standPat > alpha) alpha = standPat;
 
         Move[] captures = board.GetLegalMoves(true);
-        Move[] orderedMoves = OrderMoves(captures, board, ply); // OrderMoves will use CalculateSEE
+        Move[] orderedMoves = OrderMoves(captures, board, ply); // OrderMoves already uses CalculateSEE for scoring
 
         foreach (Move move in orderedMoves)
         {
-            // SEE Pruning: If a capture is predicted to lose material, skip it.
-            int seeValue = CalculateSEE(board, move); // Original code had CalculateSEE here, now it's also in OrderMoves
-            if (seeValue < 0)
+
+            if (!move.IsPromotion)
             {
-                continue;
+                int seeValue = CalculateSEE(board, move); // This call is added back but conditionally
+                if (seeValue < 0)
+                {
+                    continue;
+                }
             }
 
             board.MakeMove(move);
