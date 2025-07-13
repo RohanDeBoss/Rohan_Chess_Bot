@@ -4,13 +4,12 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Buffers;
 
-// v2.6 Final Debugging Integration
+// v2.6.1 Reverting PergameDebugging flag and cleanup
 public class EvilBot : IChessBot
 {
     // --- Configuration ---
-    private static readonly bool PerGameDebugging = false;    // Highest priority: If true, overrides other logs and shows one summary at game end.
-    private static readonly bool PerMoveDebugging = true;   // Second priority: If true, shows a summary for each move.
-    private static readonly bool PerDepthDebugging = false;  // Lowest priority: If true, shows details for each search depth.
+    private static readonly bool PerMoveDebugging = true;   // If true, shows a summary at the end of each move's search.
+    private static readonly bool PerDepthDebugging = false;  // If true, shows details for each completed search depth.
 
     private static readonly bool ConstantDepth = false;
     private static readonly short MaxDepth = 12; // Used when ConstantDepth is true
@@ -59,13 +58,6 @@ public class EvilBot : IChessBot
     private Timer currentTimer;
     private volatile bool timeIsUp;
     private long absoluteTimeLimit;
-
-    // Per-game stats (if PerGameDebugging is enabled)
-    private readonly List<int> gameDepths = new List<int>();
-    private readonly List<long> gameNodes = new List<long>();
-    private readonly List<double> gameNps = new List<double>();
-    private readonly List<int> gameEvals = new List<int>();
-    private bool hasLoggedGameSummary = false; // Prevents logging more than once per instance.
 
     private static readonly DescendingIntComparer _descendingIntComparer = new DescendingIntComparer();
     private class DescendingIntComparer : IComparer<int>
@@ -138,7 +130,6 @@ public class EvilBot : IChessBot
         if (legalMoves.Length == 0)
         {
             // The game is over (checkmate or stalemate) if we have no legal moves.
-            if (PerGameDebugging) LogGameSummary();
             this.bestScoreRoot = board.IsInCheck() ? -InfiniteScore : 0;
             return Move.NullMove;
         }
@@ -150,7 +141,7 @@ public class EvilBot : IChessBot
             return HandleForcedMove(legalMoves[0], board, 0, true); // Depth 0 for logging, not a search depth
         }
 
-        if (PerDepthDebugging && !PerMoveDebugging && !PerGameDebugging)
+        if (PerDepthDebugging)
         {
             Console.WriteLine("");
             DebugLog(ConstantDepth ? $"Starting constant depth search to {MaxDepth}:" : "Starting timed search:");
@@ -251,7 +242,7 @@ public class EvilBot : IChessBot
                 bestMoveOverall = bestMoveThisIteration;
                 bestMoveFromPrevIteration = bestMoveOverall;
                 this.completedSearchDepth = currentIterativeDepth;
-                if (PerDepthDebugging && !PerMoveDebugging && !PerGameDebugging)
+                if (PerDepthDebugging)
                 {
                     string timeDisplay = currentTimer.MillisecondsElapsedThisTurn <= 9999 ? $"{currentTimer.MillisecondsElapsedThisTurn}ms" : $"{(currentTimer.MillisecondsElapsedThisTurn / 1000.0):F1}s";
                     long totalNodes = negamaxPositions + qsearchPositions;
@@ -274,17 +265,6 @@ public class EvilBot : IChessBot
             this.bestScoreRoot = Evaluate(board) * (board.IsWhiteToMove ? 1 : -1);
         }
 
-        if (PerGameDebugging)
-        {
-            gameDepths.Add(completedSearchDepth);
-            long totalNodes = negamaxPositions + qsearchPositions;
-            gameNodes.Add(totalNodes);
-            double nps = currentTimer.MillisecondsElapsedThisTurn > 0 ? (totalNodes / (currentTimer.MillisecondsElapsedThisTurn / 1000.0)) : 0;
-            gameNps.Add(nps);
-            int whitePovEval = board.IsWhiteToMove ? this.bestScoreRoot : -this.bestScoreRoot;
-            gameEvals.Add(whitePovEval);
-        }
-
         return LogEval(board, this.completedSearchDepth, false, bestMoveOverall);
     }
 
@@ -295,23 +275,7 @@ public class EvilBot : IChessBot
 
     private Move LogEval(Board board, int depthCompleted, bool isForcedMove, Move moveForThisTurn)
     {
-        // Highest priority: Per-game debugging. It handles its own logging trigger.
-        if (PerGameDebugging)
-        {
-            if (!moveForThisTurn.IsNull)
-            {
-                board.MakeMove(moveForThisTurn);
-                // Game is over if it's a draw, or if the opponent has no legal moves.
-                if (board.IsDraw() || board.GetLegalMoves().Length == 0)
-                {
-                    LogGameSummary();
-                }
-                board.UndoMove(moveForThisTurn);
-            }
-            return moveForThisTurn;
-        }
-
-        // Second priority: Per-move debugging. This runs if per-game is false.
+        // Per-move debugging. This runs if the flag is enabled.
         if (PerMoveDebugging)
         {
             if (isForcedMove)
@@ -333,33 +297,8 @@ public class EvilBot : IChessBot
             }
         }
 
-        // Lowest priority: Per-depth debugging is handled inside the Think loop, so no action is needed here.
+        // Per-depth debugging is handled inside the Think loop, so no action is needed here.
         return moveForThisTurn;
-    }
-
-    private void LogGameSummary()
-    {
-        if (hasLoggedGameSummary || gameDepths.Count == 0) return;
-        hasLoggedGameSummary = true;
-
-        gameDepths.Sort();
-        gameNodes.Sort();
-        gameNps.Sort();
-        gameEvals.Sort();
-
-        int mid = gameDepths.Count / 2;
-        int medianDepth = gameDepths[mid];
-        long medianNodes = gameNodes[mid];
-        double medianNps = gameNps[mid];
-        int medianEval = gameEvals[mid];
-
-        Console.WriteLine("\n--- GAME OVER ---");
-        DebugLog("Per-Game Median Stats:");
-        DebugLog($"Depth: {medianDepth}");
-        DebugLog($"Nodes: {medianNodes:N0}");
-        DebugLog($"NPS: {(medianNps / 1000):F0}k");
-        DebugLog($"Eval: {medianEval}");
-        Console.WriteLine("-----------------\n");
     }
 
     private string GetMateInMoves(int score)
