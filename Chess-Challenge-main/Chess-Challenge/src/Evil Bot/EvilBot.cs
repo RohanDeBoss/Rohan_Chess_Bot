@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Buffers;
 
-// v2.6.1 Reverting PergameDebugging flag and cleanup
+// v2.7 Optimized evaluation with bitboard iteration for speed.
 public class EvilBot : IChessBot
 {
     // --- Configuration ---
@@ -650,46 +650,59 @@ public class EvilBot : IChessBot
     {
         if (board.IsDraw()) return 0;
 
-        Square whiteKingSquare = board.GetKingSquare(true);
-        Square blackKingSquare = board.GetKingSquare(false);
+        int score = 0;
         bool isEndgame = IsEndgame(board);
 
-        int score = 0;
+        // --- Optimized Evaluation: Iterate over bitboards directly ---
         int whiteBishopCount = 0;
         int blackBishopCount = 0;
 
-        foreach (PieceList list in board.GetAllPieceLists())
+        for (int pieceTypeIndex = 0; pieceTypeIndex < 6; pieceTypeIndex++)
         {
-            int pieceTypeIndex = (int)list.TypeOfPieceInList - 1;
+            PieceType pt = (PieceType)(pieceTypeIndex + 1);
             int baseVal = PieceValues[pieceTypeIndex];
-            int pieceSign = list.IsWhitePieceList ? 1 : -1;
+            int[] pstForPieceType = pt == PieceType.King ? (isEndgame ? KingEndGamePST : KingMiddleGamePST) : PiecePSTs[pieceTypeIndex];
 
-            if (list.TypeOfPieceInList == PieceType.Bishop)
+            // --- White Pieces ---
+            ulong whiteBitboard = board.GetPieceBitboard(pt, true);
+            if (pt == PieceType.Bishop) whiteBishopCount = BitOperations.PopCount(whiteBitboard);
+            while (whiteBitboard != 0)
             {
-                if (list.IsWhitePieceList) whiteBishopCount += list.Count; else blackBishopCount += list.Count;
+                int squareIndex = BitOperations.TrailingZeroCount(whiteBitboard);
+                score += baseVal + pstForPieceType[squareIndex]; // White's PST is not flipped (index ^ 0)
+                if (isEndgame && pt == PieceType.Pawn)
+                {
+                    int advancement = new Square(squareIndex).Rank;
+                    score += advancement * 5;
+                }
+                whiteBitboard &= whiteBitboard - 1; // Clear the least significant bit
             }
 
-            int[] pstForPieceType = list.TypeOfPieceInList == PieceType.King ? (isEndgame ? KingEndGamePST : KingMiddleGamePST) : PiecePSTs[pieceTypeIndex];
-            int xorMask = list.IsWhitePieceList ? 0 : 56;
-
-            foreach (Piece p in list)
+            // --- Black Pieces ---
+            ulong blackBitboard = board.GetPieceBitboard(pt, false);
+            if (pt == PieceType.Bishop) blackBishopCount = BitOperations.PopCount(blackBitboard);
+            while (blackBitboard != 0)
             {
-                score += pieceSign * (baseVal + pstForPieceType[p.Square.Index ^ xorMask]);
-
-                if (isEndgame && p.PieceType == PieceType.Pawn)
+                int squareIndex = BitOperations.TrailingZeroCount(blackBitboard);
+                score -= baseVal + pstForPieceType[squareIndex ^ 56]; // Black's PST is flipped
+                if (isEndgame && pt == PieceType.Pawn)
                 {
-                    int advancement = p.IsWhite ? p.Square.Rank : (7 - p.Square.Rank);
-                    score += pieceSign * advancement * 5;
+                    int advancement = 7 - new Square(squareIndex).Rank;
+                    score -= advancement * 5;
                 }
+                blackBitboard &= blackBitboard - 1; // Clear the least significant bit
             }
         }
 
+        // --- Remainder of evaluation logic is unchanged ---
         const int BISHOP_PAIR_BONUS = 30;
         if (whiteBishopCount >= 2) score += BISHOP_PAIR_BONUS;
         if (blackBishopCount >= 2) score -= BISHOP_PAIR_BONUS;
 
         if (isEndgame && Math.Abs(EvaluateMaterialOnly(board)) > 150)
         {
+            Square whiteKingSquare = board.GetKingSquare(true);
+            Square blackKingSquare = board.GetKingSquare(false);
             int kingFileDist = Math.Abs(whiteKingSquare.File - blackKingSquare.File);
             int kingRankDist = Math.Abs(whiteKingSquare.Rank - blackKingSquare.Rank);
             int kingDist = kingFileDist + kingRankDist;
@@ -789,6 +802,7 @@ public class EvilBot : IChessBot
     }
 
     // -- Piece Square Tables (Perspective of White, Black's are flipped via XOR 56) --
+    // Keep as actual squares
     private static readonly int[] PawnPST = {
           0,   0,   0,   0,   0,   0,   0,   0,
           5,  10,  10, -20, -20,  10,  11,   5,
