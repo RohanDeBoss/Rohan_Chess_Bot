@@ -4,8 +4,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Buffers;
 
-// v2.7.1.1 Increased MaxSafetyDepth to 999 and improved logging and depth reporting + Comment cleanup
-// + v2.7 Optimized evaluation with bitboard iteration for speed
+// v2.8 SEE Pruning Bugfix + New SEE_Pruning_Margin = 0
 public class EvilBot : IChessBot
 {
     // --- Configuration ---
@@ -42,11 +41,14 @@ public class EvilBot : IChessBot
     private const int TIME_CHECK_NODES = 1024;
     private const int TIME_CHECK_MASK = TIME_CHECK_NODES - 1;
 
+    private const int SEE_PRUNING_MARGIN = 0; // Allow sacs (lower = more sacs checked)
+
     // Static Fields
     private TTEntry[] tt = new TTEntry[TT_SIZE];
     private readonly ulong ttMask = TT_SIZE - 1;
     private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 }; // P, N, B, R, Q, K
     private static readonly int[] SeePieceValues = { 100, 300, 310, 500, 900, 20000 };
+    private int lastGamePlyCount = -1; //For measuring start of game
 
     // Instance Fields
     private long negamaxPositions, qsearchPositions;
@@ -69,6 +71,13 @@ public class EvilBot : IChessBot
 
     public Move Think(Board board, Timer timer)
     {
+        // Game Start Detection & TT Clear (So no overflow onto next game)
+        if (board.PlyCount < lastGamePlyCount)
+        {
+            Array.Clear(tt, 0, TT_SIZE); // Clear the TT only at the start of a new game
+        }
+        lastGamePlyCount = board.PlyCount;
+
         currentTimer = timer;
         timeIsUp = false;
         isWhitePlayer = board.IsWhiteToMove;
@@ -376,9 +385,9 @@ public class EvilBot : IChessBot
         {
             if (!move.IsPromotion)
             {
-                // Note: Full SEE (Static Exchange Evaluation) is generally the best for performance in capture ordering,
-                // outperforming simpler methods like Most Valuable Victim, Least Valuable Attacker (MVV/LVA).
-                if (CalculateSEE(board, move) < 0)
+                // Note: Full SEE outperforming simpler methods like Most Valuable Victim, Least Valuable Attacker (MVV/LVA)
+                // Bugfixed SEE, is now performing better than before.
+                if (CalculateSEE(board, move) < SEE_PRUNING_MARGIN)
                 {
                     continue;
                 }
@@ -523,37 +532,66 @@ public class EvilBot : IChessBot
 
     private int CalculateSEE(Board board, Move move)
     {
+        // Return 0 for non-captures.
         if (!move.IsCapture) return 0;
+
         Square targetSquare = move.TargetSquare;
         PieceType capturedPieceType = move.CapturePieceType;
+
+        // Use a stack-allocated span for the list of gains. Max 32 pieces on the board.
         Span<int> gain = stackalloc int[32];
-        int d = 0;
+        int d = 0; // Depth of the exchange sequence
+
+        // Get the initial state of the board for hypothetical move generation.
         ulong occupiedHypothetical = board.AllPiecesBitboard;
+
+        // The side to move next in the sequence.
         bool currentSideToRecaptureIsWhite = !board.IsWhiteToMove;
+
+        // The first gain is the value of the piece we are capturing.
         gain[d++] = GetSeeValue(capturedPieceType);
+
+        // Pretend the initial move has been made.
         occupiedHypothetical ^= (1UL << move.StartSquare.Index);
         PieceType pieceOnSquareForNextCapture = move.MovePieceType;
 
+        // --- This part finds the sequence of attackers ---
+        // It was working correctly for relative ordering, so we keep it.
         while (true)
         {
             (PieceType lvaType, Square lvaFromSquare) =
                 GetLeastValuableAttacker(board, targetSquare, currentSideToRecaptureIsWhite, occupiedHypothetical);
+
+            // If no more attackers, the sequence is over.
             if (lvaType == PieceType.None) break;
+
+            // The next attacker hypothetically moves, so its square becomes empty.
             occupiedHypothetical ^= (1UL << lvaFromSquare.Index);
+
+            // The gain for this step is the value of the piece that was on the square.
             gain[d++] = GetSeeValue(pieceOnSquareForNextCapture);
+
+            // The new piece on the square is the one that just moved.
             pieceOnSquareForNextCapture = lvaType;
+
+            // Switch sides.
             currentSideToRecaptureIsWhite = !currentSideToRecaptureIsWhite;
+
+            // Safety break for deep sequences.
             if (d >= 32) break;
         }
 
-        int seeScore = 0;
-        for (int k = d - 1; k >= 0; --k)
+        // --- CORRECTED CALCULATION LOOP ---
+        // This loop calculates the final score from the sequence of gains.
+        // It works backwards from the end of the sequence, with each player
+        // choosing whether to continue the exchange or stop.
+        for (int k = d - 1; k > 0; k--)
         {
-            int netGainIfThisCaptureIsMade = gain[k] - seeScore;
-            if (k == 0) seeScore = netGainIfThisCaptureIsMade;
-            else seeScore = Math.Max(0, netGainIfThisCaptureIsMade);
+            gain[k - 1] = -Math.Max(-gain[k - 1], gain[k] - gain[k - 1]);
         }
-        return seeScore;
+
+        // The final score is the result of the first capture in the sequence.
+        return gain[0];
     }
 
     private int EvaluateMaterialOnly(Board board)
