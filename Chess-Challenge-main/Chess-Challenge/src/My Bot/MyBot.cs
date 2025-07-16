@@ -4,7 +4,8 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Buffers;
 
-// v2.7.1.1 Increased MaxSafetyDepth to 999 and improved logging and depth reporting + Comment cleanup
+// v2.7.2 Safety TT Clearing every game
+// + v2.7.1 Increased MaxSafetyDepth to 999 and improved logging and depth reporting + Comment cleanup
 // + v2.7 Optimized evaluation with bitboard iteration for speed
 public class MyBot : IChessBot
 {
@@ -47,6 +48,7 @@ public class MyBot : IChessBot
     private readonly ulong ttMask = TT_SIZE - 1;
     private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 }; // P, N, B, R, Q, K
     private static readonly int[] SeePieceValues = { 100, 300, 310, 500, 900, 20000 };
+    private int lastGamePlyCount = -1; //For measuring start of game
 
     // Instance Fields
     private long negamaxPositions, qsearchPositions;
@@ -69,6 +71,13 @@ public class MyBot : IChessBot
 
     public Move Think(Board board, Timer timer)
     {
+        // Game Start Detection & TT Clear (So no overflow onto next game)
+        if (board.PlyCount < lastGamePlyCount)
+        {
+            Array.Clear(tt, 0, TT_SIZE); // Clear the TT only at the start of a new game
+        }
+        lastGamePlyCount = board.PlyCount;
+
         currentTimer = timer;
         timeIsUp = false;
         isWhitePlayer = board.IsWhiteToMove;
