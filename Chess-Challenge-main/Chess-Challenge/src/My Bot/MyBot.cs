@@ -4,7 +4,8 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Buffers;
 
-// v2.7.1 Increased MaxSafetyDepth to 999 and improved logging and depth reporting + Comment cleanup
+// v2.7.1.1 Increased MaxSafetyDepth to 999 and improved logging and depth reporting + Comment cleanup
+// + v2.7 Optimized evaluation with bitboard iteration for speed
 public class MyBot : IChessBot
 {
     // --- Configuration ---
@@ -137,6 +138,8 @@ public class MyBot : IChessBot
                 {
                     Move move = movesToOrder[i];
                     board.MakeMove(move);
+                    // Note: Full PVS (Principal Variation Search) is generally slower than basic Negamax with Null Move Pruning.
+                    // The current implementation is a simplified form of PVS combined with NMP.
                     int score = -Negamax(board, currentIterativeDepth - 1, -beta, -alpha, 1, 1);
                     board.UndoMove(move);
                     if (timeIsUp) goto EndRootMoveLoop_ID;
@@ -373,6 +376,8 @@ public class MyBot : IChessBot
         {
             if (!move.IsPromotion)
             {
+                // Note: Full SEE (Static Exchange Evaluation) is generally the best for performance in capture ordering,
+                // outperforming simpler methods like Most Valuable Victim, Least Valuable Attacker (MVV/LVA).
                 if (CalculateSEE(board, move) < 0)
                 {
                     continue;
