@@ -4,7 +4,8 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Buffers;
 
-// v2.8 SEE Pruning Bugfix + New SEE_Pruning_Margin = 0
+// v2.9c
+// Dynamic SEE Pruning Tweaks + Pawn push extentions + SEE nega reductions + tuning varaibles
 public class EvilBot : IChessBot
 {
     // --- Configuration ---
@@ -41,7 +42,7 @@ public class EvilBot : IChessBot
     private const int TIME_CHECK_NODES = 1024;
     private const int TIME_CHECK_MASK = TIME_CHECK_NODES - 1;
 
-    private const int SEE_PRUNING_MARGIN = 0; // Allow sacs (lower = more sacs checked)
+    private const int SEE_PRUNING_MARGIN = -50; // Allow sacs (lower = more sacs checked)
 
     // Static Fields
     private TTEntry[] tt = new TTEntry[TT_SIZE];
@@ -251,6 +252,36 @@ public class EvilBot : IChessBot
 
     private int Negamax(Board board, int depth, int alpha, int beta, int ply, int realPly)
     {
+        // --- Tunable Search Parameters ---
+        // These constants control the behavior of the search heuristics.
+        // Tweak these values to test different search strategies.
+
+        // 1. Null Move Pruning (NMP)
+        const int NMP_MIN_DEPTH = 3;
+        const int NMP_R_BASE = 2;
+        const int NMP_R_DEEP_DEPTH = 6;
+        const int NMP_R_DEEP_REDUCTION = 3;
+
+        // 2. Late Move Reductions (LMR)
+        const int LMR_MIN_DEPTH = 3;
+        const int LMR_MIN_MOVE_COUNT = 2;
+        const double LMR_LOG_DIVISOR = 2.0;
+
+        // 3. Late Move Extensions (LME)
+        const int LME_AMOUNT = 1;
+
+        // 4. Futility Pruning
+        const int FUTILITY_PRUNING_MAX_DEPTH_1 = 1;
+        const int FUTILITY_PRUNING_MARGIN_1 = 200;
+        const int FUTILITY_PRUNING_MAX_DEPTH_2 = 2;
+        const int FUTILITY_MARGIN_PER_PLY_2 = 150;
+
+        // 5. SEE-Based Reductions (for likely-bad captures)
+        const bool ENABLE_SEE_REDUCTIONS = true; // <-- SET THIS TO 'false' FOR YOUR CONTROL (EvilBot)
+        const int SEE_REDUCTION_MIN_DEPTH = 3;
+        const int SEE_REDUCTION_AMOUNT = 2;
+        // --- End of Tunable Parameters ---
+
         CheckTime();
         if (timeIsUp) return 0;
         negamaxPositions++;
@@ -288,24 +319,23 @@ public class EvilBot : IChessBot
         int standPat = 0;
         bool inCheck = board.IsInCheck();
         if (!inCheck) standPat = Evaluate(board);
+        bool inMateZone = Math.Abs(standPat) >= MATE_FOUND_SCORE;
 
-        if (!inCheck && depth >= 3 && ply > 0 && !IsEndgame(board) && Math.Abs(standPat) < MATE_FOUND_SCORE)
+        if (!inCheck && depth >= NMP_MIN_DEPTH && ply > 0 && !IsEndgame(board) && !inMateZone)
         {
             board.ForceSkipTurn();
-            int R = depth > 6 ? 3 : 2;
+            int R = depth > NMP_R_DEEP_DEPTH ? NMP_R_DEEP_REDUCTION : NMP_R_BASE;
             int nullScore = -Negamax(board, depth - R - 1, -beta, -beta + 1, ply + 1, realPly + 1);
             board.UndoSkipTurn();
             if (timeIsUp) return 0;
             if (nullScore >= beta) return beta;
         }
 
-        if (depth == 1 && !inCheck && standPat + 200 < alpha)
+        if (depth <= FUTILITY_PRUNING_MAX_DEPTH_1 && !inCheck && !inMateZone && standPat + FUTILITY_PRUNING_MARGIN_1 < alpha)
         {
             return Quiescence(board, alpha, beta, ply, 0, realPly);
         }
-
-        bool inMateZone = Math.Abs(standPat) >= MATE_FOUND_SCORE;
-        if (depth <= 2 && !inCheck && !inMateZone && standPat + 150 * depth <= alpha)
+        if (depth <= FUTILITY_PRUNING_MAX_DEPTH_2 && !inCheck && !inMateZone && standPat + FUTILITY_MARGIN_PER_PLY_2 * depth <= alpha)
         {
             return Quiescence(board, alpha, beta, ply, 0, realPly);
         }
@@ -318,18 +348,39 @@ public class EvilBot : IChessBot
         for (int i = 0; i < moves.Length; i++)
         {
             Move move = moves[i];
+
             board.MakeMove(move);
             bool givesCheck = board.IsInCheck();
             int newDepth = depth - 1;
-            if (givesCheck && newDepth < MaxSafetyDepth - 1) newDepth++;
+
+            bool isPawnPushTo7th = board.IsWhiteToMove && move.MovePieceType == PieceType.Pawn && move.TargetSquare.Rank == 6;
+            bool isPawnPushTo2nd = !board.IsWhiteToMove && move.MovePieceType == PieceType.Pawn && move.TargetSquare.Rank == 1;
+            if (givesCheck || isPawnPushTo7th || isPawnPushTo2nd)
+            {
+                newDepth += LME_AMOUNT;
+            }
 
             int score;
             bool isQuiet = !move.IsCapture && !move.IsPromotion;
-            bool useLMR = depth > 2 && i >= 2 && isQuiet && !givesCheck && !inMateZone && !IsKillerMove(move, ply);
 
+            if (ENABLE_SEE_REDUCTIONS && depth >= SEE_REDUCTION_MIN_DEPTH && move.IsCapture && !move.IsPromotion && !inCheck)
+            {
+                if (CalculateSEE(board, move) < 0)
+                {
+                    int reducedDepth = Math.Max(newDepth - SEE_REDUCTION_AMOUNT, 1);
+                    score = -Negamax(board, reducedDepth, -alpha - 1, -alpha, ply + 1, realPly + 1);
+                    if (score > alpha && !timeIsUp)
+                    {
+                        score = -Negamax(board, newDepth, -beta, -alpha, ply + 1, realPly + 1);
+                    }
+                    goto AfterSearch;
+                }
+            }
+
+            bool useLMR = depth >= LMR_MIN_DEPTH && i >= LMR_MIN_MOVE_COUNT && isQuiet && !givesCheck && !inMateZone && !IsKillerMove(move, ply);
             if (useLMR)
             {
-                int reduction = (int)(0.75 + Math.Log(depth) * Math.Log(i + 1) / 2.0);
+                int reduction = (int)(0.75 + Math.Log(depth) * Math.Log(i + 1) / LMR_LOG_DIVISOR);
                 if (historyMoves[move.StartSquare.Index, move.TargetSquare.Index] > HISTORY_SCORE_CAP / 4)
                 {
                     reduction = Math.Max(reduction - 1, 0);
@@ -346,8 +397,10 @@ public class EvilBot : IChessBot
                 score = -Negamax(board, newDepth, -beta, -alpha, ply + 1, realPly + 1);
             }
 
+        AfterSearch:
             board.UndoMove(move);
             if (timeIsUp) return 0;
+
             if (score > localBestScore)
             {
                 localBestScore = score;
@@ -365,6 +418,7 @@ public class EvilBot : IChessBot
                 }
             }
         }
+
         byte flag = localBestScore <= originalAlpha ? ALPHA : EXACT;
         AddTT(key, depth, AdjustMateScoreForTTStorage(localBestScore, realPly), flag, bestMoveCurrentNode);
         return localBestScore;
@@ -385,11 +439,19 @@ public class EvilBot : IChessBot
         {
             if (!move.IsPromotion)
             {
-                // Note: Full SEE outperforming simpler methods like Most Valuable Victim, Least Valuable Attacker (MVV/LVA)
-                // Bugfixed SEE, is now performing better than before.
-                if (CalculateSEE(board, move) < SEE_PRUNING_MARGIN)
+                // --- NEW DYNAMIC MARGIN LOGIC TO TEST ---
+
+                // 1. If we're already doing well, be very strict.
+                // If standPat is 100 points better than alpha, don't allow any losing captures.
+                if (standPat > alpha + 100)
                 {
-                    continue;
+                    if (CalculateSEE(board, move) < 0) continue;
+                }
+                // 2. Otherwise, use our standard small margin.
+                else
+                {
+                    const int SEE_PRUNING_MARGIN = -50; // You can tune this value
+                    if (CalculateSEE(board, move) < SEE_PRUNING_MARGIN) continue;
                 }
             }
             board.MakeMove(move);
