@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Buffers;
 
-// v2.9 Dynamic SEE Pruning Tweaks + Pawn push extentions + SEE nega reductions + futility reductions instead of pruning + tuning varaibles
+// v2.9.1 Dynamic SEE Pruning Tweaks + Pawn push extentions + SEE nega reductions + futility reductions instead of pruning + see_pruning_margin = -20 + piece value adjustments
 public class MyBot : IChessBot
 {
     // --- Configuration ---
@@ -41,13 +41,13 @@ public class MyBot : IChessBot
     private const int TIME_CHECK_NODES = 1024;
     private const int TIME_CHECK_MASK = TIME_CHECK_NODES - 1;
 
-    private const int SEE_PRUNING_MARGIN = -50; // Allow sacs (lower = more sacs checked)
+    private const int SEE_PRUNING_MARGIN = -20; // Allow sacs (lower = more sacs checked)
 
     // Static Fields
     private TTEntry[] tt = new TTEntry[TT_SIZE];
     private readonly ulong ttMask = TT_SIZE - 1;
-    private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 }; // P, N, B, R, Q, K
-    private static readonly int[] SeePieceValues = { 100, 300, 310, 500, 900, 20000 };
+    private static readonly int[] PieceValues = { 100, 305, 320, 500, 900, 0 }; // P, N, B, R, Q, K
+    private static readonly int[] SeePieceValues = { 100, 305, 320, 500, 900, 20000 };
     private int lastGamePlyCount = -1; //For measuring start of game
 
     // Instance Fields
