@@ -4,50 +4,81 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Buffers;
 
-// v2.8 SEE Pruning Bugfix + New SEE_Pruning_Margin = 0
+//v3.0 New tunable settings at the top, Ply-Corrected Mate Score Handling + Tweaks and value changes
 public class EvilBot : IChessBot
 {
     // --- Configuration ---
     private static readonly bool PerMoveDebugging = true;
     private static readonly bool PerDepthDebugging = false;
-
     private static readonly bool ConstantDepth = false;
     private static readonly short MaxDepth = 12;
-
     private static readonly bool UseFixedTimePerMove = false;
     private static readonly int FixedTimePerMoveMs = 500;
 
-    // Search & Eval Constants
-    private const short MaxSafetyDepth = 999; // Increased for better mate depth reporting
+    // --- Core Constants ---
+    private const short MaxSafetyDepth = 999;
     private const int InfiniteScore = 30000;
     private const int TT_SIZE = 1 << 22;
     private const int MAX_KILLER_PLY = 256;
-    private const int MATE_FOUND_SCORE = 29000; // Stricter threshold for proven mates
+    private const int MATE_FOUND_SCORE = 29000;
 
-    // Move Ordering Bonuses
-    private const int TT_MOVE_BONUS = 10_000_000;
-    private const int PREVIOUS_BEST_MOVE_BONUS = 5_000_000;
-    private const int PROMOTION_BASE_BONUS = 1_100_000;
-    private const int KILLER_MOVE_BONUS = 900_000;
-    private const int HISTORY_MAX_BONUS = 800_000;
-    private const int GOOD_CAPTURE_BONUS = 2_000_000;
-    private const int LOSING_CAPTURE_BONUS = 100_000;
-
-    // Time Management & Aspiration Window Constants
+    // --- Time Management & Aspiration Windows ---
     private const int INITIAL_ASPIRATION_WINDOW = 150;
     private const int MAX_ASPIRATION_DEPTH = 4;
     private const int SAFETY_MARGIN = 10;
-
     private const int TIME_CHECK_NODES = 1024;
     private const int TIME_CHECK_MASK = TIME_CHECK_NODES - 1;
 
-    private const int SEE_PRUNING_MARGIN = 0; // Allow sacs (lower = more sacs checked)
+
+    // -- TUNABLE SEARCH & EVAL PARAMETERS --
+
+    // Piece Values (P, N, B, R, Q, K)
+    private static readonly int[] PieceValues = { 100, 305, 320, 500, 900, 0 };      // High impact, high risk.                                     // Best: ?
+    private static readonly int[] SeePieceValues = { 100, 305, 320, 500, 900, 20000 };// Affects capture aggression. High impact, high risk.        // Best: ?
+
+    // Move Ordering Bonuses (Relative values matter most)
+    private const int TT_MOVE_BONUS = 10_000_000;            // UP: Prioritizes TT move more. Low risk.           // Best: ?
+    private const int PREVIOUS_BEST_MOVE_BONUS = 5_000_000;  // UP: Follows previous iteration more. Low risk.    // Best: ?
+    private const int PROMOTION_BASE_BONUS = 1_100_000;      // UP: Explores promotions earlier. Low risk.        // Best: ?
+    private const int KILLER_MOVE_BONUS = 900_000;           // UP: Prioritizes killers more. Low risk.           // Best: ?
+    private const int HISTORY_MAX_BONUS = 800_000;           // UP: History heuristic is stronger. Low risk.      // Best: ?
+    private const int GOOD_CAPTURE_BONUS = 2_000_000;        // UP: Prioritizes winning captures. Low risk.       // Best: ?
+    private const int LOSING_CAPTURE_BONUS = 100_000;        // UP: Prioritizes losing captures. Low risk.        // Best: ?
+
+    // --- Search Heuristics (Inside Negamax/Quiescence) ---
+    // 1. Null Move Pruning (NMP)
+    private const int NMP_MIN_DEPTH = 3;                     // UP: Less aggressive pruning (safer). DOWN: More aggressive. Medium impact, medium risk. // Best: ?
+    private const int NMP_R_BASE = 2;                        // UP: More aggressive pruning (riskier). DOWN: Less aggressive. High impact, high risk.   // Best: ?
+    private const int NMP_R_DEEP_DEPTH = 6;                  // UP: Delays deep reduction (safer). DOWN: Activates sooner. Low impact, low risk.        // Best: ?
+    private const int NMP_R_DEEP_REDUCTION = 3;              // UP: More aggressive deep pruning. DOWN: Less aggressive. Medium impact, medium risk.    // Best: ?
+
+    // 2. Late Move Reductions (LMR)
+    private const int LMR_MIN_DEPTH = 3;                     // UP: Less LMR (safer). DOWN: More LMR (riskier). Medium impact, medium risk.             // Best: ?
+    private const int LMR_MIN_MOVE_COUNT = 2;                // UP: Reduces later moves (safer). DOWN: Reduces earlier. Medium impact, medium risk.     // Best: ?
+    private const double LMR_LOG_DIVISOR = 2.0;              // UP: Less aggressive reduction (safer). DOWN: More aggressive. High impact, high risk.   // Best: ?
+
+    // 3. Late Move Extensions (LME)
+    private const int LME_AMOUNT = 1;                        // Changing this from 1 is generally not recommended. Low impact, high risk. // Best: 1
+
+    // 4. Futility Pruning
+    private const int FUTILITY_PRUNING_MAX_DEPTH_1 = 1;      // UP: Less pruning (safer). DOWN: More pruning. Low impact, medium risk.          // Best: ?
+    private const int FUTILITY_PRUNING_MARGIN_1 = 200;       // UP: Less aggressive pruning. DOWN: More aggressive. Medium impact, medium risk. // Best: ?
+    private const int FUTILITY_PRUNING_MAX_DEPTH_2 = 2;      // UP: Less pruning (safer). DOWN: More pruning. Low impact, medium risk.          // Best: ?
+    private const int FUTILITY_MARGIN_PER_PLY_2 = 150;       // UP: Less aggressive pruning. DOWN: More aggressive. Medium impact, medium risk. // Best: ?
+
+    // 5. SEE (Static Exchange Evaluation) Pruning/Reductions
+    private const int Q_SEE_PRUNING_MARGIN = -30;            // UP(less neg): Less sacrifice-friendly. DOWN: More sacs. High impact, medium risk. // Best: ?
+    private const int SEE_PRUNING_MARGIN = -20;              // UP(less neg): Reduces fewer captures. DOWN: Reduces more. Medium impact, medium risk. // Best: ?
+    private const bool ENABLE_SEE_REDUCTIONS = true;         // ON/OFF switch for the below parameters. High impact, medium risk. // Best: ?
+    private const int SEE_REDUCTION_MIN_DEPTH = 3;           // UP: Reduces less often (safer). DOWN: Reduces more. Low impact, low risk. // Best: ?
+    private const int SEE_REDUCTION_AMOUNT = 3;              // UP: Reduces more aggressively (riskier). DOWN: Less. Medium impact, medium risk. // Best: ?
+
+    // -- END OF TUNABLES --
+
 
     // Static Fields
     private TTEntry[] tt = new TTEntry[TT_SIZE];
     private readonly ulong ttMask = TT_SIZE - 1;
-    private static readonly int[] PieceValues = { 100, 300, 310, 500, 900, 0 }; // P, N, B, R, Q, K
-    private static readonly int[] SeePieceValues = { 100, 300, 310, 500, 900, 20000 };
     private int lastGamePlyCount = -1; //For measuring start of game
 
     // Instance Fields
@@ -90,12 +121,8 @@ public class EvilBot : IChessBot
 
         Array.Clear(killerMoves, 0, killerMoves.Length);
         Array.Clear(historyMoves, 0, historyMoves.Length);
-        negamaxPositions = 0;
-        qsearchPositions = 0;
-        completedSearchDepth = 0;
-        lastBoardHash = 0;
-        cachedPieceCount = -1;
-        bestScoreRoot = 0;
+        negamaxPositions = 0; qsearchPositions = 0; completedSearchDepth = 0;
+        lastBoardHash = 0; cachedPieceCount = -1; bestScoreRoot = 0;
 
         short currentIterativeDepth = 1;
         int scoreFromPrevIteration = 0;
@@ -147,8 +174,6 @@ public class EvilBot : IChessBot
                 {
                     Move move = movesToOrder[i];
                     board.MakeMove(move);
-                    // Note: Full PVS (Principal Variation Search) is generally slower than basic Negamax with Null Move Pruning.
-                    // The current implementation is a simplified form of PVS combined with NMP.
                     int score = -Negamax(board, currentIterativeDepth - 1, -beta, -alpha, 1, 1);
                     board.UndoMove(move);
                     if (timeIsUp) goto EndRootMoveLoop_ID;
@@ -203,10 +228,9 @@ public class EvilBot : IChessBot
 
         if (bestMoveOverall.IsNull && legalMoves.Length > 0) bestMoveOverall = legalMoves[0];
 
-        // Final depth reporting adjustment, happens after the loop finishes.
         if (Math.Abs(bestScoreRoot) >= MATE_FOUND_SCORE)
         {
-            int pliesToMate = (InfiniteScore - Math.Abs(bestScoreRoot) + 49) / 50;
+            int pliesToMate = InfiniteScore - Math.Abs(bestScoreRoot);
             completedSearchDepth = MaxSafetyDepth - pliesToMate;
         }
 
@@ -238,26 +262,45 @@ public class EvilBot : IChessBot
         return moveForThisTurn;
     }
 
+    private short GetTimeSpentFraction(Timer timer) //Tuning needed
+    {
+        int t = timer.MillisecondsRemaining;
+        int result = 20 + 99900 / (t + 1675);
+        return (short)Math.Max(26, Math.Min(65, result));
+    }
+
+    private int AllocateTime(Timer timer)
+    {
+        if (ConstantDepth) return int.MaxValue;
+        if (UseFixedTimePerMove) return Math.Max(1, Math.Min(FixedTimePerMoveMs, timer.MillisecondsRemaining - SAFETY_MARGIN));
+
+        short timeFraction = Math.Max(GetTimeSpentFraction(timer), (short)1);
+        int allocated = (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 2);
+        allocated = Math.Max(10, allocated - SAFETY_MARGIN);
+        allocated = Math.Min(allocated, timer.MillisecondsRemaining - SAFETY_MARGIN);
+        return Math.Max(1, allocated);
+    }
+
     private string GetMateInMoves(int score)
     {
-        if (Math.Abs(score) < MATE_FOUND_SCORE)
-        {
-            return null;
-        }
-        int sign = Math.Sign(score);
-        int pliesToMate = (InfiniteScore - Math.Abs(score) + 49) / 50;
-        return $"{(sign > 0 ? "Winning" : "Losing")} Mate in {pliesToMate} ply";
+        if (Math.Abs(score) < MATE_FOUND_SCORE) return null;
+
+        int pliesToMate = InfiniteScore - Math.Abs(score);
+        int movesToMate = (pliesToMate + 1) / 2;
+        return $"{(Math.Sign(score) > 0 ? "Winning" : "Losing")} Mate in {movesToMate} moves ({pliesToMate} ply)";
     }
 
     private int Negamax(Board board, int depth, int alpha, int beta, int ply, int realPly)
     {
+        // -- Tunable parameters for this function are now at the top of the class --
+
         CheckTime();
         if (timeIsUp) return 0;
         negamaxPositions++;
         if (board.IsDraw()) return 0;
 
-        alpha = Math.Max(alpha, -InfiniteScore + realPly * 50);
-        beta = Math.Min(beta, InfiniteScore - realPly * 50);
+        alpha = Math.Max(alpha, -InfiniteScore + realPly);
+        beta = Math.Min(beta, InfiniteScore - realPly);
         if (alpha >= beta) return alpha;
 
         ulong key = board.ZobristKey;
@@ -268,6 +311,7 @@ public class EvilBot : IChessBot
 
         if (ttHit && ttEntry.Depth >= depth)
         {
+            // The critical mate score adjustment happens here when retrieving from TT
             short scoreFromTT = AdjustMateScoreFromTT(ttEntry.Score, realPly);
             if (ttEntry.Flag == EXACT) return scoreFromTT;
             if (ttEntry.Flag == ALPHA && scoreFromTT <= alpha) return alpha;
@@ -282,30 +326,31 @@ public class EvilBot : IChessBot
         Move[] moves = board.GetLegalMoves();
         if (moves.Length == 0)
         {
-            return board.IsInCheck() ? (-InfiniteScore + realPly * 50) : 0;
+            return board.IsInCheck() ? (-InfiniteScore + realPly) : 0;
         }
 
         int standPat = 0;
         bool inCheck = board.IsInCheck();
         if (!inCheck) standPat = Evaluate(board);
+        bool inMateZone = Math.Abs(standPat) >= MATE_FOUND_SCORE;
 
-        if (!inCheck && depth >= 3 && ply > 0 && !IsEndgame(board) && Math.Abs(standPat) < MATE_FOUND_SCORE)
+        // Null Move Pruning
+        if (!inCheck && depth >= NMP_MIN_DEPTH && ply > 0 && !IsEndgame(board) && !inMateZone)
         {
             board.ForceSkipTurn();
-            int R = depth > 6 ? 3 : 2;
+            int R = depth > NMP_R_DEEP_DEPTH ? NMP_R_DEEP_REDUCTION : NMP_R_BASE;
             int nullScore = -Negamax(board, depth - R - 1, -beta, -beta + 1, ply + 1, realPly + 1);
             board.UndoSkipTurn();
             if (timeIsUp) return 0;
             if (nullScore >= beta) return beta;
         }
 
-        if (depth == 1 && !inCheck && standPat + 200 < alpha)
+        // Futility Pruning
+        if (depth <= FUTILITY_PRUNING_MAX_DEPTH_1 && !inCheck && !inMateZone && standPat + FUTILITY_PRUNING_MARGIN_1 < alpha)
         {
             return Quiescence(board, alpha, beta, ply, 0, realPly);
         }
-
-        bool inMateZone = Math.Abs(standPat) >= MATE_FOUND_SCORE;
-        if (depth <= 2 && !inCheck && !inMateZone && standPat + 150 * depth <= alpha)
+        if (depth <= FUTILITY_PRUNING_MAX_DEPTH_2 && !inCheck && !inMateZone && standPat + FUTILITY_MARGIN_PER_PLY_2 * depth <= alpha)
         {
             return Quiescence(board, alpha, beta, ply, 0, realPly);
         }
@@ -318,18 +363,42 @@ public class EvilBot : IChessBot
         for (int i = 0; i < moves.Length; i++)
         {
             Move move = moves[i];
+
             board.MakeMove(move);
             bool givesCheck = board.IsInCheck();
             int newDepth = depth - 1;
-            if (givesCheck && newDepth < MaxSafetyDepth - 1) newDepth++;
+
+            // Extensions
+            bool isPawnPushTo7th = board.IsWhiteToMove && move.MovePieceType == PieceType.Pawn && move.TargetSquare.Rank == 6;
+            bool isPawnPushTo2nd = !board.IsWhiteToMove && move.MovePieceType == PieceType.Pawn && move.TargetSquare.Rank == 1;
+            if (givesCheck || isPawnPushTo7th || isPawnPushTo2nd)
+            {
+                newDepth += LME_AMOUNT;
+            }
 
             int score;
             bool isQuiet = !move.IsCapture && !move.IsPromotion;
-            bool useLMR = depth > 2 && i >= 2 && isQuiet && !givesCheck && !inMateZone && !IsKillerMove(move, ply);
 
+            // SEE-based Reductions
+            if (ENABLE_SEE_REDUCTIONS && depth >= SEE_REDUCTION_MIN_DEPTH && move.IsCapture && !move.IsPromotion && !inCheck)
+            {
+                if (CalculateSEE(board, move) < SEE_PRUNING_MARGIN)
+                {
+                    int reducedDepth = Math.Max(newDepth - SEE_REDUCTION_AMOUNT, 1);
+                    score = -Negamax(board, reducedDepth, -alpha - 1, -alpha, ply + 1, realPly + 1);
+                    if (score > alpha && !timeIsUp)
+                    {
+                        score = -Negamax(board, newDepth, -beta, -alpha, ply + 1, realPly + 1);
+                    }
+                    goto AfterSearch;
+                }
+            }
+
+            // Late Move Reductions (LMR)
+            bool useLMR = depth >= LMR_MIN_DEPTH && i >= LMR_MIN_MOVE_COUNT && isQuiet && !givesCheck && !inMateZone && !IsKillerMove(move, ply);
             if (useLMR)
             {
-                int reduction = (int)(0.75 + Math.Log(depth) * Math.Log(i + 1) / 2.0);
+                int reduction = (int)(0.75 + Math.Log(depth) * Math.Log(i + 1) / LMR_LOG_DIVISOR);
                 if (historyMoves[move.StartSquare.Index, move.TargetSquare.Index] > HISTORY_SCORE_CAP / 4)
                 {
                     reduction = Math.Max(reduction - 1, 0);
@@ -346,8 +415,10 @@ public class EvilBot : IChessBot
                 score = -Negamax(board, newDepth, -beta, -alpha, ply + 1, realPly + 1);
             }
 
+        AfterSearch:
             board.UndoMove(move);
             if (timeIsUp) return 0;
+
             if (score > localBestScore)
             {
                 localBestScore = score;
@@ -365,6 +436,7 @@ public class EvilBot : IChessBot
                 }
             }
         }
+
         byte flag = localBestScore <= originalAlpha ? ALPHA : EXACT;
         AddTT(key, depth, AdjustMateScoreForTTStorage(localBestScore, realPly), flag, bestMoveCurrentNode);
         return localBestScore;
@@ -385,11 +457,19 @@ public class EvilBot : IChessBot
         {
             if (!move.IsPromotion)
             {
-                // Note: Full SEE outperforming simpler methods like Most Valuable Victim, Least Valuable Attacker (MVV/LVA)
-                // Bugfixed SEE, is now performing better than before.
-                if (CalculateSEE(board, move) < SEE_PRUNING_MARGIN)
+                // --- DYNAMIC MARGIN LOGIC TO TEST ---
+                // (Using the Q_SEE_PRUNING_MARGIN from the tunable parameters section)
+
+                // 1. If we're already doing well, be very strict.
+                // If standPat is 100 points better than alpha, don't allow any losing captures.
+                if (standPat > alpha + 100)
                 {
-                    continue;
+                    if (CalculateSEE(board, move) < 0) continue;
+                }
+                // 2. Otherwise, use our standard small margin.
+                else
+                {
+                    if (CalculateSEE(board, move) < Q_SEE_PRUNING_MARGIN) continue;
                 }
             }
             board.MakeMove(move);
@@ -452,6 +532,8 @@ public class EvilBot : IChessBot
         int score = 0;
         bool isEndgame = IsEndgame(board);
         int whiteBishopCount = 0, blackBishopCount = 0;
+        const int BISHOP_PAIR_BONUS = 25; // Tunable eval term
+        const int TEMPO_BONUS = 10; // Tunable eval term
 
         for (int pieceTypeIndex = 0; pieceTypeIndex < 6; pieceTypeIndex++)
         {
@@ -477,9 +559,10 @@ public class EvilBot : IChessBot
                 blackBitboard &= blackBitboard - 1;
             }
         }
-        const int BISHOP_PAIR_BONUS = 30;
+
         if (whiteBishopCount >= 2) score += BISHOP_PAIR_BONUS;
         if (blackBishopCount >= 2) score -= BISHOP_PAIR_BONUS;
+
         if (isEndgame && Math.Abs(EvaluateMaterialOnly(board)) > 150)
         {
             Square whiteKingSquare = board.GetKingSquare(true);
@@ -488,7 +571,7 @@ public class EvilBot : IChessBot
             int proximityBonus = (14 - kingDist) * 5;
             if (score > 0) score += proximityBonus; else if (score < 0) score -= proximityBonus;
         }
-        const int TEMPO_BONUS = 10;
+
         score += board.IsWhiteToMove ? TEMPO_BONUS : -TEMPO_BONUS;
         return board.IsWhiteToMove ? score : -score;
     }
@@ -532,65 +615,31 @@ public class EvilBot : IChessBot
 
     private int CalculateSEE(Board board, Move move)
     {
-        // Return 0 for non-captures.
         if (!move.IsCapture) return 0;
-
         Square targetSquare = move.TargetSquare;
-        PieceType capturedPieceType = move.CapturePieceType;
-
-        // Use a stack-allocated span for the list of gains. Max 32 pieces on the board.
         Span<int> gain = stackalloc int[32];
-        int d = 0; // Depth of the exchange sequence
-
-        // Get the initial state of the board for hypothetical move generation.
+        int d = 0;
         ulong occupiedHypothetical = board.AllPiecesBitboard;
-
-        // The side to move next in the sequence.
         bool currentSideToRecaptureIsWhite = !board.IsWhiteToMove;
-
-        // The first gain is the value of the piece we are capturing.
-        gain[d++] = GetSeeValue(capturedPieceType);
-
-        // Pretend the initial move has been made.
+        gain[d++] = GetSeeValue(move.CapturePieceType);
         occupiedHypothetical ^= (1UL << move.StartSquare.Index);
         PieceType pieceOnSquareForNextCapture = move.MovePieceType;
 
-        // --- This part finds the sequence of attackers ---
-        // It was working correctly for relative ordering, so we keep it.
         while (true)
         {
-            (PieceType lvaType, Square lvaFromSquare) =
-                GetLeastValuableAttacker(board, targetSquare, currentSideToRecaptureIsWhite, occupiedHypothetical);
-
-            // If no more attackers, the sequence is over.
+            (PieceType lvaType, Square lvaFromSquare) = GetLeastValuableAttacker(board, targetSquare, currentSideToRecaptureIsWhite, occupiedHypothetical);
             if (lvaType == PieceType.None) break;
-
-            // The next attacker hypothetically moves, so its square becomes empty.
             occupiedHypothetical ^= (1UL << lvaFromSquare.Index);
-
-            // The gain for this step is the value of the piece that was on the square.
             gain[d++] = GetSeeValue(pieceOnSquareForNextCapture);
-
-            // The new piece on the square is the one that just moved.
             pieceOnSquareForNextCapture = lvaType;
-
-            // Switch sides.
             currentSideToRecaptureIsWhite = !currentSideToRecaptureIsWhite;
-
-            // Safety break for deep sequences.
             if (d >= 32) break;
         }
 
-        // --- CORRECTED CALCULATION LOOP ---
-        // This loop calculates the final score from the sequence of gains.
-        // It works backwards from the end of the sequence, with each player
-        // choosing whether to continue the exchange or stop.
         for (int k = d - 1; k > 0; k--)
         {
             gain[k - 1] = -Math.Max(-gain[k - 1], gain[k] - gain[k - 1]);
         }
-
-        // The final score is the result of the first capture in the sequence.
         return gain[0];
     }
 
@@ -625,25 +674,6 @@ public class EvilBot : IChessBot
                 timeIsUp = true;
             }
         }
-    }
-
-    private short GetTimeSpentFraction(Timer timer)
-    {
-        int t = timer.MillisecondsRemaining;
-        int result = 20 + 99900 / (t + 1675);
-        return (short)Math.Max(26, Math.Min(65, result));
-    }
-
-    private int AllocateTime(Timer timer)
-    {
-        if (ConstantDepth) return int.MaxValue;
-        if (UseFixedTimePerMove) return Math.Max(1, Math.Min(FixedTimePerMoveMs, timer.MillisecondsRemaining - SAFETY_MARGIN));
-
-        short timeFraction = Math.Max(GetTimeSpentFraction(timer), (short)1);
-        int allocated = (timer.MillisecondsRemaining / timeFraction) + (timer.IncrementMilliseconds / 2);
-        allocated = Math.Max(10, allocated - SAFETY_MARGIN);
-        allocated = Math.Min(allocated, timer.MillisecondsRemaining - SAFETY_MARGIN);
-        return Math.Max(1, allocated);
     }
 
     private bool IsKillerMove(Move move, int ply)
@@ -693,25 +723,36 @@ public class EvilBot : IChessBot
     {
         int index = GetTTIndex(key);
         ref TTEntry entry = ref tt[index];
-        bool replace = entry.Key == 0 || depth > entry.Depth || (depth == entry.Depth && (flag == EXACT || (flag == BETA && entry.Flag == ALPHA)));
+        bool replace = entry.Key == 0 || depth >= entry.Depth;
         if (replace)
         {
             entry.Key = key;
             entry.Depth = (short)depth;
             entry.Score = scoreForTT;
             entry.Flag = flag;
-            if (flag == EXACT || flag == BETA || !bestMove.IsNull) entry.BestMove = bestMove;
-            else if (flag == ALPHA && bestMove.IsNull && entry.BestMove.IsNull) entry.BestMove = Move.NullMove;
+            entry.BestMove = bestMove;
         }
     }
 
     private short AdjustMateScoreForTTStorage(int scoreFromNode, int currentRealPly)
     {
-        if (Math.Abs(scoreFromNode) >= MATE_FOUND_SCORE) return (short)Math.Clamp(scoreFromNode, -(InfiniteScore - MAX_KILLER_PLY * 50), InfiniteScore - MAX_KILLER_PLY * 50);
+        if (Math.Abs(scoreFromNode) >= MATE_FOUND_SCORE)
+        {
+            int sign = Math.Sign(scoreFromNode);
+            return (short)(scoreFromNode + (sign * currentRealPly));
+        }
         return (short)scoreFromNode;
     }
 
-    private short AdjustMateScoreFromTT(short ttScore, int currentRealPly) => ttScore;
+    private short AdjustMateScoreFromTT(short ttScore, int currentRealPly)
+    {
+        if (Math.Abs(ttScore) >= MATE_FOUND_SCORE)
+        {
+            int sign = Math.Sign(ttScore);
+            return (short)(ttScore - (sign * currentRealPly));
+        }
+        return ttScore;
+    }
 
     private void DebugLog(string message)
     {
@@ -792,6 +833,6 @@ public class EvilBot : IChessBot
     };
 
     private static readonly int[][] PiecePSTs = {
-        PawnPST, KnightPST, BishopPST, RookPST, QueenPST, KingMiddleGamePST // KingMiddleGamePST is default for non-King PST lookup
+        PawnPST, KnightPST, BishopPST, RookPST, QueenPST, KingMiddleGamePST
     };
 }
