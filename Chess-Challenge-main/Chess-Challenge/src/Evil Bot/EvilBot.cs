@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Buffers;
 
-//v3.0 New tunable settings at the top, Ply-Corrected Mate Score Handling + Tweaks and value changes
+//v3.1 Qsearch rework to improve flaws and makes it more efficient.
 public class EvilBot : IChessBot
 {
     // --- Configuration ---
@@ -26,7 +26,7 @@ public class EvilBot : IChessBot
     private const int INITIAL_ASPIRATION_WINDOW = 150;
     private const int MAX_ASPIRATION_DEPTH = 4;
     private const int SAFETY_MARGIN = 10;
-    private const int TIME_CHECK_NODES = 1024;
+    private const int TIME_CHECK_NODES = 2048;
     private const int TIME_CHECK_MASK = TIME_CHECK_NODES - 1;
 
 
@@ -446,39 +446,80 @@ public class EvilBot : IChessBot
     {
         qsearchPositions++;
         if (timeIsUp) return 0;
+
+        // --- HYBRID QUIESCENCE LOGIC ---
+        bool inCheck = board.IsInCheck();
+
+        // 1. CHECK EVASION SEARCH: If in check, we must search all legal moves.
+        // The stand-pat score is not used here because "standing pat" is illegal.
+        if (inCheck)
+        {
+            // Generate all legal moves to find an escape.
+            Move[] moves = OrderMoves(board.GetLegalMoves(), board, ply);
+
+            // If there are no legal moves, it's checkmate.
+            if (moves.Length == 0)
+            {
+                return -InfiniteScore + realPly;
+            }
+
+            foreach (Move move in moves)
+            {
+                board.MakeMove(move);
+                // Note: We recursively call Quiescence, not Negamax. This keeps us in a tactical-only search.
+                int score = -Quiescence(board, -beta, -alpha, ply + 1, qDepth + 1, realPly + 1);
+                board.UndoMove(move);
+
+                if (timeIsUp) return 0;
+
+                if (score >= beta) return beta;
+                if (score > alpha) alpha = score;
+            }
+            return alpha;
+        }
+
+        // 2. STANDARD QUIESCENCE SEARCH: If not in check, use stand-pat and search only captures/promotions.
         int standPat = Evaluate(board);
         if (standPat >= beta) return beta;
         if (standPat > alpha) alpha = standPat;
 
-        Move[] captures = board.GetLegalMoves(true);
-        Move[] orderedMoves = OrderMoves(captures, board, ply);
+        // Generate only tactical moves (captures and promotions). This is much faster.
+        var tacticalMoves = new List<Move>();
+        foreach (Move move in board.GetLegalMoves()) // A single call to GetLegalMoves is often fine
+        {
+            if (move.IsCapture || move.IsPromotion)
+            {
+                tacticalMoves.Add(move);
+            }
+        }
+
+        Move[] orderedMoves = OrderMoves(tacticalMoves.ToArray(), board, ply);
 
         foreach (Move move in orderedMoves)
         {
+            // Use SEE pruning on potentially bad captures. Skip for promotions.
             if (!move.IsPromotion)
             {
-                // --- DYNAMIC MARGIN LOGIC TO TEST ---
-                // (Using the Q_SEE_PRUNING_MARGIN from the tunable parameters section)
-
-                // 1. If we're already doing well, be very strict.
-                // If standPat is 100 points better than alpha, don't allow any losing captures.
                 if (standPat > alpha + 100)
                 {
                     if (CalculateSEE(board, move) < 0) continue;
                 }
-                // 2. Otherwise, use our standard small margin.
                 else
                 {
                     if (CalculateSEE(board, move) < Q_SEE_PRUNING_MARGIN) continue;
                 }
             }
+
             board.MakeMove(move);
             int score = -Quiescence(board, -beta, -alpha, ply + 1, qDepth + 1, realPly + 1);
             board.UndoMove(move);
+
             if (timeIsUp) return 0;
+
             if (score >= beta) return beta;
             if (score > alpha) alpha = score;
         }
+
         return alpha;
     }
 
