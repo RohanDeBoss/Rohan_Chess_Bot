@@ -4,7 +4,8 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Buffers;
 
-//v3.1 Qsearch rework to improve flaws and makes it more efficient.
+//v3.1.1 Small Optimisations to qsearch for speed
+// + 3.1 Qsearch rework to improve flaws and makes it more efficient.
 public class EvilBot : IChessBot
 {
     // --- Configuration ---
@@ -447,75 +448,73 @@ public class EvilBot : IChessBot
         qsearchPositions++;
         if (timeIsUp) return 0;
 
-        // --- HYBRID QUIESCENCE LOGIC ---
         bool inCheck = board.IsInCheck();
 
-        // 1. CHECK EVASION SEARCH: If in check, we must search all legal moves.
-        // The stand-pat score is not used here because "standing pat" is illegal.
+        // 1. CHECK EVASION SEARCH (This part is already optimal)
         if (inCheck)
         {
-            // Generate all legal moves to find an escape.
             Move[] moves = OrderMoves(board.GetLegalMoves(), board, ply);
-
-            // If there are no legal moves, it's checkmate.
-            if (moves.Length == 0)
-            {
-                return -InfiniteScore + realPly;
-            }
+            if (moves.Length == 0) return -InfiniteScore + realPly;
 
             foreach (Move move in moves)
             {
                 board.MakeMove(move);
-                // Note: We recursively call Quiescence, not Negamax. This keeps us in a tactical-only search.
                 int score = -Quiescence(board, -beta, -alpha, ply + 1, qDepth + 1, realPly + 1);
                 board.UndoMove(move);
 
                 if (timeIsUp) return 0;
-
                 if (score >= beta) return beta;
                 if (score > alpha) alpha = score;
             }
             return alpha;
         }
 
-        // 2. STANDARD QUIESCENCE SEARCH: If not in check, use stand-pat and search only captures/promotions.
+        // 2. STANDARD QUIESCENCE SEARCH
         int standPat = Evaluate(board);
         if (standPat >= beta) return beta;
         if (standPat > alpha) alpha = standPat;
 
-        // Generate only tactical moves (captures and promotions). This is much faster.
-        var tacticalMoves = new List<Move>();
-        foreach (Move move in board.GetLegalMoves()) // A single call to GetLegalMoves is often fine
+        // --- OPTIMIZATION: Prune bad SEE moves BEFORE ordering ---
+        var allTacticalMoves = new List<Move>(32);
+        foreach (Move move in board.GetLegalMoves())
         {
             if (move.IsCapture || move.IsPromotion)
             {
-                tacticalMoves.Add(move);
+                allTacticalMoves.Add(move);
             }
         }
 
-        Move[] orderedMoves = OrderMoves(tacticalMoves.ToArray(), board, ply);
+        var movesToSearch = new List<Move>(allTacticalMoves.Count);
+        // Determine the SEE threshold based on how well we are doing
+        int seeThreshold = (standPat > alpha + 100) ? 0 : Q_SEE_PRUNING_MARGIN;
+
+        foreach (Move move in allTacticalMoves)
+        {
+            // Always include promotions
+            if (move.IsPromotion)
+            {
+                movesToSearch.Add(move);
+                continue;
+            }
+
+            // For captures, only include them if they pass the SEE check
+            if (CalculateSEE(board, move) >= seeThreshold)
+            {
+                movesToSearch.Add(move);
+            }
+        }
+        // --- END OF OPTIMIZATION ---
+
+        // Now, order the much smaller, pre-filtered list of moves
+        Move[] orderedMoves = OrderMoves(movesToSearch.ToArray(), board, ply);
 
         foreach (Move move in orderedMoves)
         {
-            // Use SEE pruning on potentially bad captures. Skip for promotions.
-            if (!move.IsPromotion)
-            {
-                if (standPat > alpha + 100)
-                {
-                    if (CalculateSEE(board, move) < 0) continue;
-                }
-                else
-                {
-                    if (CalculateSEE(board, move) < Q_SEE_PRUNING_MARGIN) continue;
-                }
-            }
-
             board.MakeMove(move);
             int score = -Quiescence(board, -beta, -alpha, ply + 1, qDepth + 1, realPly + 1);
             board.UndoMove(move);
 
             if (timeIsUp) return 0;
-
             if (score >= beta) return beta;
             if (score > alpha) alpha = score;
         }
