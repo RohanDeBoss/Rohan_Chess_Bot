@@ -4,8 +4,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Buffers;
 
-//v3.1.1 Small Optimisations to qsearch for speed
-// + 3.1 Qsearch rework to improve flaws and makes it more efficient.
+//v3.2 Pawn structure evaluation improvements!
 public class EvilBot : IChessBot
 {
     // --- Configuration ---
@@ -36,6 +35,12 @@ public class EvilBot : IChessBot
     // Piece Values (P, N, B, R, Q, K)
     private static readonly int[] PieceValues = { 100, 305, 320, 500, 900, 0 };      // High impact, high risk.                                     // Best: ?
     private static readonly int[] SeePieceValues = { 100, 305, 320, 500, 900, 20000 };// Affects capture aggression. High impact, high risk.        // Best: ?
+
+    // Pawn Structure Evaluation
+    private const int DOUBLED_PAWN_PENALTY = -10;
+    private const int ISOLATED_PAWN_PENALTY = -15;
+    private const int PASSED_PAWN_BASE_BONUS = 20;
+    private const int PASSED_PAWN_RANK_BONUS = 15;
 
     // Move Ordering Bonuses (Relative values matter most)
     private const int TT_MOVE_BONUS = 10_000_000;            // UP: Prioritizes TT move more. Low risk.           // Best: ?
@@ -572,14 +577,16 @@ public class EvilBot : IChessBot
         int score = 0;
         bool isEndgame = IsEndgame(board);
         int whiteBishopCount = 0, blackBishopCount = 0;
-        const int BISHOP_PAIR_BONUS = 25; // Tunable eval term
-        const int TEMPO_BONUS = 10; // Tunable eval term
+        const int BISHOP_PAIR_BONUS = 25;
+        const int TEMPO_BONUS = 10;
 
+        // --- SECTION 1: CORE EVALUATION FOR ALL PIECES (CRITICAL, WAS MISSING) ---
         for (int pieceTypeIndex = 0; pieceTypeIndex < 6; pieceTypeIndex++)
         {
             PieceType pt = (PieceType)(pieceTypeIndex + 1);
             int baseVal = PieceValues[pieceTypeIndex];
             int[] pstForPieceType = pt == PieceType.King ? (isEndgame ? KingEndGamePST : KingMiddleGamePST) : PiecePSTs[pieceTypeIndex];
+
             ulong whiteBitboard = board.GetPieceBitboard(pt, true);
             if (pt == PieceType.Bishop) whiteBishopCount = BitOperations.PopCount(whiteBitboard);
             while (whiteBitboard != 0)
@@ -589,6 +596,7 @@ public class EvilBot : IChessBot
                 if (isEndgame && pt == PieceType.Pawn) score += new Square(squareIndex).Rank * 5;
                 whiteBitboard &= whiteBitboard - 1;
             }
+
             ulong blackBitboard = board.GetPieceBitboard(pt, false);
             if (pt == PieceType.Bishop) blackBishopCount = BitOperations.PopCount(blackBitboard);
             while (blackBitboard != 0)
@@ -600,6 +608,55 @@ public class EvilBot : IChessBot
             }
         }
 
+        // --- SECTION 2: PAWN STRUCTURE EVALUATION (FAST & CORRECTLY ADDED) ---
+        int pawnStructureScore = 0;
+        ulong whitePawns = board.GetPieceBitboard(PieceType.Pawn, true);
+        ulong blackPawns = board.GetPieceBitboard(PieceType.Pawn, false);
+
+        // Doubled Pawns
+        for (int file = 0; file < 8; file++)
+        {
+            int whitePawnsInFile = BitOperations.PopCount(whitePawns & FileMasks[file]);
+            if (whitePawnsInFile > 1) pawnStructureScore += (whitePawnsInFile - 1) * DOUBLED_PAWN_PENALTY;
+            int blackPawnsInFile = BitOperations.PopCount(blackPawns & FileMasks[file]);
+            if (blackPawnsInFile > 1) pawnStructureScore -= (blackPawnsInFile - 1) * DOUBLED_PAWN_PENALTY;
+        }
+
+        // Isolated and Passed Pawns (White)
+        ulong tempWhitePawns = whitePawns;
+        while (tempWhitePawns != 0)
+        {
+            int sqIndex = BitOperations.TrailingZeroCount(tempWhitePawns);
+            int file = sqIndex & 7, rank = sqIndex >> 3;
+            if ((whitePawns & AdjacentFilesMasks[file]) == 0) pawnStructureScore += ISOLATED_PAWN_PENALTY;
+
+            ulong passedMask = (FileMasks[file] | AdjacentFilesMasks[file]) & WhiteForwardRankMasks[rank];
+            if ((blackPawns & passedMask) == 0)
+            {
+                pawnStructureScore += PASSED_PAWN_BASE_BONUS + (rank * PASSED_PAWN_RANK_BONUS);
+            }
+            tempWhitePawns &= tempWhitePawns - 1;
+        }
+
+        // Isolated and Passed Pawns (Black)
+        ulong tempBlackPawns = blackPawns;
+        while (tempBlackPawns != 0)
+        {
+            int sqIndex = BitOperations.TrailingZeroCount(tempBlackPawns);
+            int file = sqIndex & 7, rank = sqIndex >> 3;
+            if ((blackPawns & AdjacentFilesMasks[file]) == 0) pawnStructureScore -= ISOLATED_PAWN_PENALTY;
+
+            ulong passedMask = (FileMasks[file] | AdjacentFilesMasks[file]) & BlackForwardRankMasks[rank];
+            if ((whitePawns & passedMask) == 0)
+            {
+                pawnStructureScore -= PASSED_PAWN_BASE_BONUS + ((7 - rank) * PASSED_PAWN_RANK_BONUS);
+            }
+            tempBlackPawns &= tempBlackPawns - 1;
+        }
+
+        score += pawnStructureScore; // ADD the pawn score to the main score
+
+        // --- SECTION 3: OTHER EVALUATION TERMS ---
         if (whiteBishopCount >= 2) score += BISHOP_PAIR_BONUS;
         if (blackBishopCount >= 2) score -= BISHOP_PAIR_BONUS;
 
@@ -798,6 +855,25 @@ public class EvilBot : IChessBot
     {
         Console.WriteLine($"{GetType().Name} {message}");
     }
+
+    // Self-contained helper masks, since the API does not provide them.
+    private static readonly ulong[] FileMasks = {
+    0x0101010101010101, 0x0202020202020202, 0x0404040404040404, 0x0808080808080808,
+    0x1010101010101010, 0x2020202020202020, 0x4040404040404040, 0x8080808080808080
+};
+    private static readonly ulong[] AdjacentFilesMasks = {
+    0x0202020202020202, 0x0505050505050505, 0x0a0a0a0a0a0a0a0a, 0x1414141414141414,
+    0x2828282828282828, 0x5050505050505050, 0xa0a0a0a0a0a0a0a0, 0x4040404040404040
+};
+    // Fast lookup table for all squares "in front of" a given rank.
+    private static readonly ulong[] WhiteForwardRankMasks = {
+    0xFFFFFFFFFFFFFF00, 0xFFFFFFFFFFFF0000, 0xFFFFFFFFFF000000, 0xFFFFFFFF00000000,
+    0xFFFFFF0000000000, 0xFFFF000000000000, 0xFF00000000000000, 0x0
+};
+    private static readonly ulong[] BlackForwardRankMasks = {
+    0x0, 0x00000000000000FF, 0x000000000000FFFF, 0x0000000000FFFFFF,
+    0x00000000FFFFFFFF, 0x000000FFFFFFFFFF, 0x0000FFFFFFFFFFFF, 0x00FFFFFFFFFFFFFF
+};
 
     // -- Piece Square Tables (Perspective of White, Black's are flipped via XOR 56) --
     // Keep as actual squares
