@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Buffers;
 
-//v3.4 Tampered evaluation
+//v3.4.1 Tampered evaluation + debugging consistency improvements
 public class MyBot : IChessBot
 {
     // --- Configuration ---
@@ -236,7 +236,11 @@ public class MyBot : IChessBot
                     long totalNodes = negamaxPositions + qsearchPositions;
                     string timeDisplay = currentTimer.MillisecondsElapsedThisTurn <= 9999 ? $"{currentTimer.MillisecondsElapsedThisTurn}ms" : $"{(currentTimer.MillisecondsElapsedThisTurn / 1000.0):F1}s";
                     string nodesDisplay = totalNodes < 10000 ? $"{totalNodes}" : totalNodes < 10000000 ? $"{(totalNodes / 1000.0):F1}k" : $"{(totalNodes / 1000000.0):F1}m";
-                    DebugLog($"Depth {currentIterativeDepth}, Score {bestScoreRoot}, BestMove {bestMoveOverall}, Nodes {nodesDisplay}, Time {timeDisplay}");
+
+                    // --- UNIVERSAL SCORE CALCULATION ---
+                    int displayScore = isWhitePlayer ? bestScoreRoot : -bestScoreRoot;
+
+                    DebugLog($"Depth {currentIterativeDepth}, Score {displayScore}, BestMove {bestMoveOverall}, Nodes {nodesDisplay}, Time {timeDisplay}");
                 }
             }
             else { break; }
@@ -808,7 +812,8 @@ public class MyBot : IChessBot
 
     private Move HandleForcedMove(Move move, Board board, int completedDepthForLog, bool isForcedMove)
     {
-        this.bestScoreRoot = Evaluate(board) * (board.IsWhiteToMove ? 1 : -1);
+        // Store score relative to side-to-move, mirroring Negamax behavior
+        this.bestScoreRoot = Evaluate(board);
         this.completedSearchDepth = completedDepthForLog;
         return LogEval(board, completedDepthForLog, isForcedMove, move);
     }
