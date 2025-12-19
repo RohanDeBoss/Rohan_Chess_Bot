@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Buffers;
 
-//v3.3 (Optimized & Safe Pruning + Reverse pruning)
+//v3.3.1 (Optimized & Safe Pruning + Reverse pruning)
 public class MyBot : IChessBot
 {
     // --- Configuration ---
@@ -74,7 +74,7 @@ public class MyBot : IChessBot
 
     // 5. SEE (Static Exchange Evaluation) Pruning/Reductions
     private const int Q_SEE_PRUNING_MARGIN = -30;            // UP(less neg): Less sacrifice-friendly. DOWN: More sacs. High impact, medium risk. // Best: ?
-    private const int SEE_PRUNING_MARGIN = -20;              // UP(less neg): Reduces fewer captures. DOWN: Reduces more. Medium impact, medium risk. // Best: ?
+    private const int SEE_PRUNING_MARGIN = -30;              // UP(less neg): Reduces fewer captures. DOWN: Reduces more. Medium impact, medium risk. // Best: ?
     private const bool ENABLE_SEE_REDUCTIONS = true;         // ON/OFF switch for the below parameters. High impact, medium risk. // Best: ?
     private const int SEE_REDUCTION_MIN_DEPTH = 3;           // UP: Reduces less often (safer). DOWN: Reduces more. Low impact, low risk. // Best: ?
     private const int SEE_REDUCTION_AMOUNT = 3;              // UP: Reduces more aggressively (riskier). DOWN: Less. Medium impact, medium risk. // Best: ?
