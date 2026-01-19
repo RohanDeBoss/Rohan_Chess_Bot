@@ -2,10 +2,11 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using System.Buffers;
 
-// MyBot v0.4 - SEE Reduction Removal Test
-// LME is vital for strength (Restored).
-// SEE Reductions in main search are expensive and maybe unnecessary (Removed).
+// Trustbot 1.2 - No Piece Square Tables + King Attack HCE + Knight Centrality
+// Added: Knight centrality bonus (+0.05 per layer: 6x6, 5x5, 4x4, 3x3, 2x2).
+//        Results in { 0, 5, 15, 25 } based on distance from edge.
 public class MyBot : IChessBot
 {
     // --- Configuration ---
@@ -34,104 +35,15 @@ public class MyBot : IChessBot
     // -- TUNABLE SEARCH & EVAL PARAMETERS --
 
     // Piece Values (P, N, B, R, Q, K)
-    private static readonly int[] MG_PieceValues = { 100, 305, 310, 500, 900, 0 };
-    private static readonly int[] EG_PieceValues = { 120, 290, 305, 510, 950, 0 };
+    private static readonly int[] MG_PieceValues = { 100, 310, 325, 500, 900, 0 };
+    private static readonly int[] EG_PieceValues = { 120, 290, 305, 520, 950, 0 };
 
-    // -- Piece Square Tables (Perspective of White, Black's are flipped via XOR 56) --
-    private static readonly int[] PawnPST = {
-          0,   0,   0,   0,   0,   0,   0,   0,
-          5,  10,  10, -20, -20,  10,  11,   5,
-          5,  -1, -10,   1,   3, -10,   0,   5,
-          1,   3,   6,  21,  22,   0,   0,   0,
-          5,   5,  10,  25,  25,  10,   5,   5,
-         12,  10,  20,  30,  30,  20,  11,  10,
-         50,  50,  50,  50,  50,  50,  50,  50,
-          0,   0,   0,   0,   0,   0,   0,   0
-    };
-    private static readonly int[] KnightPST = {
-        -50, -40, -30, -30, -30, -30, -40, -50,
-        -40, -20,   0,   5,   5,   0, -20, -40,
-        -30,   5,  10,  15,  15,  10,   5, -30,
-        -30,   0,  15,  20,  20,  15,   0, -30,
-        -30,   5,  15,  20,  20,  15,   5, -30,
-        -30,   0,  10,  15,  15,  10,   0, -30,
-        -40, -20,  -3,   0,   0,  -3, -20, -40,
-        -50, -40, -30, -30, -30, -30, -40, -50
-    };
-    private static readonly int[] BishopPST = {
-        -20, -10, -10, -10, -10, -10, -10, -20,
-        -10,   5,   0,   0,   0,   0,   5, -10,
-        -10,  10,  10,  10,  10,  10,  10, -10,
-        -10,   0,  10,  10,  10,  10,   0, -10,
-        -10,   5,   5,  10,  10,   5,   5, -10,
-        -10,   0,   5,  10,  10,   5,   0, -10,
-        -10,   0,   0,   0,   0,   0,   0, -10,
-        -20, -10, -10, -10, -10, -10, -10, -20
-    };
-    private static readonly int[] RookPST = {
-          0,   0,   0,   5,   5,   0,   0,  -4,
-         -5,   0,   0,   0,   0,   0,   0,  -5,
-         -5,   0,   0,   0,   0,   0,   0,  -5,
-         -5,   0,   0,   0,   0,   0,   0,  -5,
-         -5,   0,   0,   0,   0,   0,   0,  -5,
-         -5,   0,   0,   0,   0,   0,   0,  -5,
-          0,  10,  10,  10,  10,  10,  10,   5,
-          0,   0,   0,   0,   0,   0,   0,   0
-    };
-    private static readonly int[] QueenPST = {
-        -20, -10, -10,  -5,  -5, -10, -10, -20,
-        -10,   0,   5,   0,   0,   0,   0, -10,
-        -10,   5,   5,   5,   5,   5,   0, -10,
-          0,   0,   5,   5,   5,   5,   0,  -5,
-         -5,   0,   5,   5,   5,   5,   0,  -5,
-        -10,   0,   5,   5,   5,   5,   0, -10,
-        -10,   0,   0,   0,   0,   0,   0, -10,
-        -20, -10, -10,  -5,  -5, -10, -10, -20
-    };
-    private static readonly int[] KingMiddleGamePST = {
-         20,  30,  10,   0,   0,  10,  30,  20,
-         20,  20,   0,   0,   0,   0,  20,  20,
-        -10, -20, -20, -20, -20, -20, -20, -10,
-        -20, -30, -30, -40, -40, -30, -30, -20,
-        -30, -40, -40, -50, -50, -40, -40, -30,
-        -30, -40, -40, -50, -50, -40, -40, -30,
-        -30, -40, -40, -50, -50, -40, -40, -30,
-        -30, -40, -40, -50, -50, -40, -40, -30
-    };
-    private static readonly int[] KingEndGamePST = {
-        -30, -20, -20, -20, -20, -20, -20, -30,
-        -20, -15, -10,   0,   0, -10, -10, -20,
-        -20, -10,  15,  20,  15,  15, -10, -20,
-        -20, -10,  15,  18,  18,  15, -10, -20,
-        -20, -10,  15,  18,  18,  15, -10, -20,
-        -20, -10,  10,  15,  15,  15, -10, -20,
-        -20, -15, -10,  -5,  -5, -10, -15, -20,
-        -30, -25, -20, -15, -15, -20, -25, -30
-    };
+    // King Attack HCE Constants
+    private const int KING_ATTACK_BASE_BONUS = 20;  // +0.2 for hitting 1 square
+    private const int KING_ATTACK_EXTRA_BONUS = 10; // +0.1 for hitting 2+ squares
 
-    // Index via PieceType: None, Pawn, Knight, Bishop, Rook, Queen (King separate)
-    private static readonly int[][] PiecePSTs = {
-        Array.Empty<int>(), PawnPST, KnightPST, BishopPST, RookPST, QueenPST
-    };
-
-    // HCE Constants
-    private const int KING_ATTACK_BASE_BONUS = 20;  // +0.2
-    private const int KING_ATTACK_EXTRA_BONUS = 10; // +0.1
-    private const int BISHOP_MOBILITY_BONUS = 3;
-
-    // King Safety (MG Only)
-    private const int KING_SAFETY_EXPOSURE_PENALTY = 1; // -0.01 per open pseudo-queen square
-
-    // Rook HCE
-    private const int ROOK_MOBILITY_EG = 2;
-    private const int ROOK_OPEN_FILE_MG = 10;
-    private const int ROOK_OPEN_FILE_EG = 25;
-    private const int ROOK_SEMI_OPEN_FILE_MG = 5;
-    private const int ROOK_SEMI_OPEN_FILE_EG = 15;
-
-    // Endgame King Proximity
-    private const int ENDGAME_MAT_THRESHOLD = 1000; // 10 points
-    private const int KING_PROXIMITY_PENALTY = 4;   // -0.04 per dist
+    // Knight Centrality HCE (Edge -> Center: 0, 5, 15, 25)
+    private static readonly int[] KnightCenterBonus = { 0, 5, 15, 25 };
 
     // Phase weights for tapering
     private const int KnightPhase = 1;
@@ -139,7 +51,7 @@ public class MyBot : IChessBot
     private const int RookPhase = 2;
     private const int QueenPhase = 4;
     private const int TotalPhase = 24;
-    private static readonly int[] SeePieceValues = { 100, 305, 310, 500, 900, 20000 };
+    private static readonly int[] SeePieceValues = { 100, 305, 320, 500, 900, 20000 };
 
     // Pawn Structure Evaluation
     private const int DOUBLED_PAWN_PENALTY = -10;
@@ -173,8 +85,11 @@ public class MyBot : IChessBot
     private const int FUTILITY_MARGIN_PER_PLY = 120;
 
     private const int Q_SEE_PRUNING_MARGIN = -30;
+    private const int SEE_PRUNING_MARGIN = -30;
+    private const bool ENABLE_SEE_REDUCTIONS = true;
+    private const int SEE_REDUCTION_MIN_DEPTH = 3;
+    private const int SEE_REDUCTION_AMOUNT = 3;
 
-    // NOTE: SEE Reductions in main search constants removed as logic is disabled
 
     // Static Fields
     private TTEntry[] tt = new TTEntry[TT_SIZE];
@@ -186,6 +101,8 @@ public class MyBot : IChessBot
     private int bestScoreRoot;
     private Move[,] killerMoves = new Move[MAX_KILLER_PLY, 2];
     private int[,] historyMoves = new int[64, 64];
+    private int cachedPieceCount = -1;
+    private ulong lastBoardHash;
     private int completedSearchDepth;
     private Timer currentTimer;
     private volatile bool timeIsUp;
@@ -219,7 +136,7 @@ public class MyBot : IChessBot
         Array.Clear(killerMoves, 0, killerMoves.Length);
         Array.Clear(historyMoves, 0, historyMoves.Length);
         negamaxPositions = 0; qsearchPositions = 0; completedSearchDepth = 0;
-        bestScoreRoot = 0;
+        lastBoardHash = 0; cachedPieceCount = -1; bestScoreRoot = 0;
 
         short currentIterativeDepth = 1;
         int scoreFromPrevIteration = 0;
@@ -465,8 +382,6 @@ public class MyBot : IChessBot
             }
 
             board.MakeMove(move);
-
-            // LME: Late Move Extensions (Restored)
             bool givesCheck = board.IsInCheck();
             int newDepth = depth - 1;
 
@@ -477,8 +392,17 @@ public class MyBot : IChessBot
 
             int score;
 
-            // SEE REDUCTIONS REMOVED
-            // We rely on move ordering and LMR to handle bad captures.
+            // SEE-based Reductions
+            if (ENABLE_SEE_REDUCTIONS && depth >= SEE_REDUCTION_MIN_DEPTH && move.IsCapture && !isQuiet && !inCheck)
+            {
+                if (CalculateSEE(board, move) < SEE_PRUNING_MARGIN)
+                {
+                    int reducedDepth = Math.Max(newDepth - SEE_REDUCTION_AMOUNT, 1);
+                    score = -Negamax(board, reducedDepth, -alpha - 1, -alpha, ply + 1, realPly + 1);
+                    if (score > alpha && !timeIsUp) score = -Negamax(board, newDepth, -beta, -alpha, ply + 1, realPly + 1);
+                    goto AfterSearch;
+                }
+            }
 
             // Late Move Reductions (LMR)
             bool useLMR = depth >= LMR_MIN_DEPTH && i >= LMR_MIN_MOVE_COUNT && isQuiet && !givesCheck && !inMateZone && !IsKillerMove(move, ply);
@@ -579,39 +503,40 @@ public class MyBot : IChessBot
     private Move[] OrderMoves(Move[] moves, Board board, int ply, Move? pvMoveHint = null)
     {
         if (moves.Length <= 1) return moves;
-
-        // stackalloc is faster and cleaner than ArrayPool for small arrays
-        Span<int> scores = stackalloc int[moves.Length];
-
-        TTEntry ttEntry = tt[GetTTIndex(board.ZobristKey)];
-        Move ttMove = (ttEntry.Key == board.ZobristKey) ? ttEntry.BestMove : Move.NullMove;
-
-        for (int i = 0; i < moves.Length; i++)
+        int[] scores = ArrayPool<int>.Shared.Rent(moves.Length);
+        try
         {
-            Move move = moves[i];
-            int moveScore = 0;
+            TTEntry ttEntry = tt[GetTTIndex(board.ZobristKey)];
+            Move ttMove = (ttEntry.Key == board.ZobristKey) ? ttEntry.BestMove : Move.NullMove;
 
-            if (!ttMove.IsNull && move == ttMove) moveScore += TT_MOVE_BONUS;
-            else if (ply == 0 && pvMoveHint.HasValue && move == pvMoveHint.Value) moveScore += PREVIOUS_BEST_MOVE_BONUS;
-
-            if (move.IsCapture)
+            for (int i = 0; i < moves.Length; i++)
             {
-                int seeScoreVal = CalculateSEE(board, move);
-                moveScore += (seeScoreVal >= 0 ? GOOD_CAPTURE_BONUS : LOSING_CAPTURE_BONUS) + seeScoreVal;
-            }
-            else
-            {
-                if (IsKillerMove(move, ply)) moveScore += KILLER_MOVE_BONUS;
-                moveScore += Math.Min(historyMoves[move.StartSquare.Index, move.TargetSquare.Index], HISTORY_MAX_BONUS);
-            }
+                Move move = moves[i];
+                int moveScore = 0;
+                if (!ttMove.IsNull && move == ttMove) moveScore += TT_MOVE_BONUS;
+                else if (ply == 0 && pvMoveHint.HasValue && move == pvMoveHint.Value) moveScore += PREVIOUS_BEST_MOVE_BONUS;
 
-            if (move.IsPromotion) moveScore += PROMOTION_BASE_BONUS + GetSeeValue(move.PromotionPieceType);
-            scores[i] = moveScore;
+                if (move.IsCapture)
+                {
+                    int seeScoreVal = CalculateSEE(board, move);
+                    if (seeScoreVal >= 0) moveScore += GOOD_CAPTURE_BONUS + seeScoreVal;
+                    else moveScore += LOSING_CAPTURE_BONUS + seeScoreVal;
+                }
+                else
+                {
+                    if (IsKillerMove(move, ply)) moveScore += KILLER_MOVE_BONUS;
+                    moveScore += Math.Min(historyMoves[move.StartSquare.Index, move.TargetSquare.Index], HISTORY_MAX_BONUS);
+                }
+                if (move.IsPromotion) moveScore += PROMOTION_BASE_BONUS + GetSeeValue(move.PromotionPieceType);
+                scores[i] = moveScore;
+            }
+            Array.Sort(scores, moves, 0, moves.Length, _descendingIntComparer);
+            return moves;
         }
-
-        // Use .AsSpan() on 'moves' so the compiler can infer types correctly
-        scores.Sort(moves.AsSpan(), _descendingIntComparer);
-        return moves;
+        finally
+        {
+            ArrayPool<int>.Shared.Return(scores);
+        }
     }
 
     private int Evaluate(Board board)
@@ -625,40 +550,24 @@ public class MyBot : IChessBot
         int whiteBishopCount = 0;
         int blackBishopCount = 0;
 
-        // Material counters for endgame proximity logic
-        int whiteMaterial = 0;
-        int blackMaterial = 0;
-
+        // --- KING RING CALCULATION ---
         Square whiteKingSq = board.GetKingSquare(true);
         Square blackKingSq = board.GetKingSquare(false);
-
-        // Pre-calculate data needed for loops
         ulong whiteKingRing = BitboardHelper.GetKingAttacks(whiteKingSq);
         ulong blackKingRing = BitboardHelper.GetKingAttacks(blackKingSq);
         ulong allPieces = board.AllPiecesBitboard;
-        ulong whitePieces = board.WhitePiecesBitboard;
-        ulong blackPieces = board.BlackPiecesBitboard;
-        ulong whitePawns = board.GetPieceBitboard(PieceType.Pawn, true);
-        ulong blackPawns = board.GetPieceBitboard(PieceType.Pawn, false);
 
-        // Loop P(0), N(1), B(2), R(3), Q(4) - Handle King Separately
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < 6; i++)
         {
             PieceType pt = (PieceType)(i + 1);
             ulong whiteBB = board.GetPieceBitboard(pt, true);
             ulong blackBB = board.GetPieceBitboard(pt, false);
 
             int count = BitOperations.PopCount(whiteBB | blackBB);
-
-            // Phase Calculation
-            if (i == 1) gamePhase += count * KnightPhase;       // Knight
-            else if (i == 2) gamePhase += count * BishopPhase;  // Bishop
-            else if (i == 3) gamePhase += count * RookPhase;    // Rook
-            else if (i == 4) gamePhase += count * QueenPhase;   // Queen
-
-            int[] currentPST = PiecePSTs[i + 1];
-            int mgVal = MG_PieceValues[i];
-            int egVal = EG_PieceValues[i];
+            if (i == 1) gamePhase += count * KnightPhase;
+            else if (i == 2) gamePhase += count * BishopPhase;
+            else if (i == 3) gamePhase += count * RookPhase;
+            else if (i == 4) gamePhase += count * QueenPhase;
 
             // --- WHITE PIECES ---
             ulong tempWhite = whiteBB;
@@ -666,50 +575,38 @@ public class MyBot : IChessBot
             {
                 int sqIndex = BitOperations.TrailingZeroCount(tempWhite);
 
-                // Material + PST
-                int pstVal = currentPST[sqIndex];
-                mgScore += mgVal + pstVal;
-                egScore += egVal + pstVal;
-                whiteMaterial += mgVal;
+                // Material Score
+                if (i == 2) whiteBishopCount++;
+                mgScore += MG_PieceValues[i];
+                egScore += EG_PieceValues[i];
 
-                // Piece Specific Logic
-                switch (i)
+                // Knight Centrality Bonus
+                if (i == 1)
                 {
-                    case 2: // Bishop
-                        whiteBishopCount++;
-                        ulong bMoves = BitboardHelper.GetSliderAttacks(PieceType.Bishop, new Square(sqIndex), allPieces) & ~whitePieces;
-                        int bMob = BitOperations.PopCount(bMoves) * BISHOP_MOBILITY_BONUS;
-                        mgScore += bMob; egScore += bMob;
-                        break;
-                    case 3: // Rook
-                        int rFile = sqIndex & 7;
-                        ulong rFileMask = FileMasks[rFile];
-                        bool wBlocked = (whitePawns & rFileMask) != 0;
-                        bool bBlocked = (blackPawns & rFileMask) != 0;
-
-                        if (!wBlocked)
-                        {
-                            if (!bBlocked) { mgScore += ROOK_OPEN_FILE_MG; egScore += ROOK_OPEN_FILE_EG; }
-                            else { mgScore += ROOK_SEMI_OPEN_FILE_MG; egScore += ROOK_SEMI_OPEN_FILE_EG; }
-                        }
-
-                        ulong rMoves = BitboardHelper.GetSliderAttacks(PieceType.Rook, new Square(sqIndex), allPieces) & ~whitePieces;
-                        egScore += BitOperations.PopCount(rMoves) * ROOK_MOBILITY_EG;
-                        break;
+                    int file = sqIndex & 7; int rank = sqIndex >> 3;
+                    int dist = Math.Min(Math.Min(file, 7 - file), Math.Min(rank, 7 - rank));
+                    int bonus = KnightCenterBonus[dist];
+                    mgScore += bonus;
+                    egScore += bonus;
                 }
 
-                // King Attacks
-                ulong attacks = 0;
-                Square sq = new Square(sqIndex);
-                if (pt == PieceType.Pawn) attacks = BitboardHelper.GetPawnAttacks(sq, true);
-                else if (pt == PieceType.Knight) attacks = BitboardHelper.GetKnightAttacks(sq);
-                else attacks = BitboardHelper.GetSliderAttacks(pt, sq, allPieces);
-
-                int hits = BitOperations.PopCount(attacks & blackKingRing);
-                if (hits > 0)
+                // King Attack Bonus (Exclude our King)
+                if (i != 5)
                 {
-                    int bonus = KING_ATTACK_BASE_BONUS + (hits > 1 ? KING_ATTACK_EXTRA_BONUS : 0);
-                    mgScore += bonus; egScore += bonus;
+                    ulong attacks = 0;
+                    Square sq = new Square(sqIndex);
+                    if (pt == PieceType.Pawn) attacks = BitboardHelper.GetPawnAttacks(sq, true);
+                    else if (pt == PieceType.Knight) attacks = BitboardHelper.GetKnightAttacks(sq);
+                    else attacks = BitboardHelper.GetSliderAttacks(pt, sq, allPieces);
+
+                    int hits = BitOperations.PopCount(attacks & blackKingRing);
+                    if (hits > 0)
+                    {
+                        int bonus = KING_ATTACK_BASE_BONUS;
+                        if (hits > 1) bonus += KING_ATTACK_EXTRA_BONUS;
+                        mgScore += bonus;
+                        egScore += bonus;
+                    }
                 }
 
                 tempWhite &= tempWhite - 1;
@@ -720,98 +617,53 @@ public class MyBot : IChessBot
             while (tempBlack != 0)
             {
                 int sqIndex = BitOperations.TrailingZeroCount(tempBlack);
-                int pstVal = currentPST[sqIndex ^ 56]; // Flip for Black
 
-                mgScore -= mgVal + pstVal;
-                egScore -= egVal + pstVal;
-                blackMaterial += mgVal;
+                // Material Score
+                if (i == 2) blackBishopCount++;
+                mgScore -= MG_PieceValues[i];
+                egScore -= EG_PieceValues[i];
 
-                switch (i)
+                // Knight Centrality Bonus
+                if (i == 1)
                 {
-                    case 2: // Bishop
-                        blackBishopCount++;
-                        ulong bMoves = BitboardHelper.GetSliderAttacks(PieceType.Bishop, new Square(sqIndex), allPieces) & ~blackPieces;
-                        int bMob = BitOperations.PopCount(bMoves) * BISHOP_MOBILITY_BONUS;
-                        mgScore -= bMob; egScore -= bMob;
-                        break;
-                    case 3: // Rook
-                        int rFile = sqIndex & 7;
-                        ulong rFileMask = FileMasks[rFile];
-                        bool bBlocked = (blackPawns & rFileMask) != 0;
-                        bool wBlocked = (whitePawns & rFileMask) != 0;
-
-                        if (!bBlocked)
-                        {
-                            if (!wBlocked) { mgScore -= ROOK_OPEN_FILE_MG; egScore -= ROOK_OPEN_FILE_EG; }
-                            else { mgScore -= ROOK_SEMI_OPEN_FILE_MG; egScore -= ROOK_SEMI_OPEN_FILE_EG; }
-                        }
-
-                        ulong rMoves = BitboardHelper.GetSliderAttacks(PieceType.Rook, new Square(sqIndex), allPieces) & ~blackPieces;
-                        egScore -= BitOperations.PopCount(rMoves) * ROOK_MOBILITY_EG;
-                        break;
+                    int file = sqIndex & 7; int rank = sqIndex >> 3;
+                    int dist = Math.Min(Math.Min(file, 7 - file), Math.Min(rank, 7 - rank));
+                    int bonus = KnightCenterBonus[dist];
+                    mgScore -= bonus;
+                    egScore -= bonus;
                 }
 
-                // King Attacks
-                ulong attacks = 0;
-                Square sq = new Square(sqIndex);
-                if (pt == PieceType.Pawn) attacks = BitboardHelper.GetPawnAttacks(sq, false);
-                else if (pt == PieceType.Knight) attacks = BitboardHelper.GetKnightAttacks(sq);
-                else attacks = BitboardHelper.GetSliderAttacks(pt, sq, allPieces);
-
-                int hits = BitOperations.PopCount(attacks & whiteKingRing);
-                if (hits > 0)
+                // King Attack Bonus (Exclude our King)
+                if (i != 5)
                 {
-                    int bonus = KING_ATTACK_BASE_BONUS + (hits > 1 ? KING_ATTACK_EXTRA_BONUS : 0);
-                    mgScore -= bonus; egScore -= bonus;
+                    ulong attacks = 0;
+                    Square sq = new Square(sqIndex);
+                    if (pt == PieceType.Pawn) attacks = BitboardHelper.GetPawnAttacks(sq, false);
+                    else if (pt == PieceType.Knight) attacks = BitboardHelper.GetKnightAttacks(sq);
+                    else attacks = BitboardHelper.GetSliderAttacks(pt, sq, allPieces);
+
+                    int hits = BitOperations.PopCount(attacks & whiteKingRing);
+                    if (hits > 0)
+                    {
+                        int bonus = KING_ATTACK_BASE_BONUS;
+                        if (hits > 1) bonus += KING_ATTACK_EXTRA_BONUS;
+                        mgScore -= bonus;
+                        egScore -= bonus;
+                    }
                 }
 
                 tempBlack &= tempBlack - 1;
             }
         }
 
-        // --- KINGS (Material is 0, just PSTs and Safety) ---
-        int wKingIdx = whiteKingSq.Index;
-        int bKingIdx = blackKingSq.Index;
-
-        // King PSTs
-        mgScore += KingMiddleGamePST[wKingIdx];
-        egScore += KingEndGamePST[wKingIdx];
-
-        mgScore -= KingMiddleGamePST[bKingIdx ^ 56];
-        egScore -= KingEndGamePST[bKingIdx ^ 56];
-
-        // King Safety (Mg Only)
-        ulong wKingShield = BitboardHelper.GetSliderAttacks(PieceType.Queen, whiteKingSq, allPieces) & ~RankMasks[whiteKingSq.Rank] & ~whitePieces;
-        mgScore -= BitOperations.PopCount(wKingShield) * KING_SAFETY_EXPOSURE_PENALTY;
-
-        ulong bKingShield = BitboardHelper.GetSliderAttacks(PieceType.Queen, blackKingSq, allPieces) & ~RankMasks[blackKingSq.Rank] & ~blackPieces;
-        mgScore += BitOperations.PopCount(bKingShield) * KING_SAFETY_EXPOSURE_PENALTY;
-
-        // Endgame Proximity
-        if (whiteMaterial < ENDGAME_MAT_THRESHOLD && blackMaterial > whiteMaterial)
-        {
-            int dist = Math.Abs(whiteKingSq.File - blackKingSq.File) + Math.Abs(whiteKingSq.Rank - blackKingSq.Rank);
-            int penalty = Math.Max(0, (dist - 2) * KING_PROXIMITY_PENALTY);
-            mgScore += penalty; egScore += penalty;
-        }
-        else if (blackMaterial < ENDGAME_MAT_THRESHOLD && whiteMaterial > blackMaterial)
-        {
-            int dist = Math.Abs(whiteKingSq.File - blackKingSq.File) + Math.Abs(whiteKingSq.Rank - blackKingSq.Rank);
-            int penalty = Math.Max(0, (dist - 2) * KING_PROXIMITY_PENALTY);
-            mgScore -= penalty; egScore -= penalty;
-        }
-
-        // Bishop Pair
         if (whiteBishopCount >= 2) { mgScore += 25; egScore += 35; }
         if (blackBishopCount >= 2) { mgScore -= 25; egScore -= 35; }
 
-        // Pawns
         int pawnMg, pawnEg;
         CalculatePawnScore(board, out pawnMg, out pawnEg);
         mgScore += pawnMg;
         egScore += pawnEg;
 
-        // Final Tapering
         int phase = Math.Min(gamePhase, TotalPhase);
         int finalScore = (mgScore * phase + egScore * (TotalPhase - phase)) / TotalPhase;
 
@@ -927,8 +779,13 @@ public class MyBot : IChessBot
 
     private bool IsEndgame(Board board)
     {
-        // 11 pieces or fewer (kings included) is a safe endgame threshold
-        return BitOperations.PopCount(board.AllPiecesBitboard) <= 11;
+        if (board.ZobristKey != lastBoardHash)
+        {
+            cachedPieceCount = BitOperations.PopCount(board.AllPiecesBitboard);
+            lastBoardHash = board.ZobristKey;
+        }
+        const int endgameTotalPieceThreshold = 11;
+        return cachedPieceCount <= endgameTotalPieceThreshold;
     }
 
     private void CheckTime()
@@ -1030,10 +887,6 @@ public class MyBot : IChessBot
     private static readonly ulong[] FileMasks = {
     0x0101010101010101, 0x0202020202020202, 0x0404040404040404, 0x0808080808080808,
     0x1010101010101010, 0x2020202020202020, 0x4040404040404040, 0x8080808080808080
-    };
-    private static readonly ulong[] RankMasks = {
-    0x00000000000000FF, 0x000000000000FF00, 0x0000000000FF0000, 0x00000000FF000000,
-    0x000000FF00000000, 0x0000FF0000000000, 0x00FF000000000000, 0xFF00000000000000
     };
     private static readonly ulong[] AdjacentFilesMasks = {
     0x0202020202020202, 0x0505050505050505, 0x0a0a0a0a0a0a0a0a, 0x1414141414141414,

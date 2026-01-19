@@ -3,9 +3,12 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 
-// MyBot v0.4 - SEE Reduction Removal Test
-// LME is vital for strength (Restored).
-// SEE Reductions in main search are expensive and maybe unnecessary (Removed).
+// MyBot v0.3 - Code Simplification & Optimization
+// Changes:
+// - Evaluate: Refactored main loop to reduce branching and optimize logic flow.
+// - OrderMoves: Switched to stackalloc (Span<T>) to remove heap allocations.
+// - IsEndgame: Simplified to intrinsic PopCount.
+
 public class MyBot : IChessBot
 {
     // --- Configuration ---
@@ -173,8 +176,11 @@ public class MyBot : IChessBot
     private const int FUTILITY_MARGIN_PER_PLY = 120;
 
     private const int Q_SEE_PRUNING_MARGIN = -30;
-
-    // NOTE: SEE Reductions in main search constants removed as logic is disabled
+    private const int SEE_PRUNING_MARGIN = -30;
+    private const bool ENABLE_SEE_REDUCTIONS = true;
+    private const int SEE_REDUCTION_MIN_DEPTH = 3;
+    private const int SEE_REDUCTION_DEEP = 3;
+    private const int SEE_REDUCTION_SHALLOW = 2;
 
     // Static Fields
     private TTEntry[] tt = new TTEntry[TT_SIZE];
@@ -465,8 +471,6 @@ public class MyBot : IChessBot
             }
 
             board.MakeMove(move);
-
-            // LME: Late Move Extensions (Restored)
             bool givesCheck = board.IsInCheck();
             int newDepth = depth - 1;
 
@@ -477,8 +481,18 @@ public class MyBot : IChessBot
 
             int score;
 
-            // SEE REDUCTIONS REMOVED
-            // We rely on move ordering and LMR to handle bad captures.
+            // SEE-based Reductions
+            if (ENABLE_SEE_REDUCTIONS && depth >= SEE_REDUCTION_MIN_DEPTH && move.IsCapture && !isQuiet && !inCheck)
+            {
+                if (CalculateSEE(board, move) < SEE_PRUNING_MARGIN)
+                {
+                    int seeReduction = (depth > 5) ? SEE_REDUCTION_DEEP : SEE_REDUCTION_SHALLOW;
+                    int reducedDepth = Math.Max(newDepth - seeReduction, 1);
+                    score = -Negamax(board, reducedDepth, -alpha - 1, -alpha, ply + 1, realPly + 1);
+                    if (score > alpha && !timeIsUp) score = -Negamax(board, newDepth, -beta, -alpha, ply + 1, realPly + 1);
+                    goto AfterSearch;
+                }
+            }
 
             // Late Move Reductions (LMR)
             bool useLMR = depth >= LMR_MIN_DEPTH && i >= LMR_MIN_MOVE_COUNT && isQuiet && !givesCheck && !inMateZone && !IsKillerMove(move, ply);
@@ -609,8 +623,9 @@ public class MyBot : IChessBot
             scores[i] = moveScore;
         }
 
-        // Use .AsSpan() on 'moves' so the compiler can infer types correctly
+        // FIX: Use .AsSpan() on 'moves' so the compiler can infer types correctly
         scores.Sort(moves.AsSpan(), _descendingIntComparer);
+
         return moves;
     }
 

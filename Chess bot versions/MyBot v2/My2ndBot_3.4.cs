@@ -5,13 +5,13 @@ using System.Numerics;
 using System.Buffers;
 
 //v3.4.1 Tampered evaluation + debugging consistency improvements
-public class MyBot : IChessBot
+public class EvilBot : IChessBot
 {
     // --- Configuration ---
     private static readonly bool PerMoveDebugging = true;
-    private static readonly bool PerDepthDebugging = true;
+    private static readonly bool PerDepthDebugging = false;
     private static readonly bool ConstantDepth = false;
-    private static readonly short MaxDepth = 12;
+    private static readonly short MaxDepth = 5;
     private static readonly bool UseFixedTimePerMove = false;
     private static readonly int FixedTimePerMoveMs = 500;
 
